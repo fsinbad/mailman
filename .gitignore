@@ -1,5 +1,7 @@
 # Editor history
 .history/
+.kiro/
+*.jpeg
 
 # Test files
 test-*.html
