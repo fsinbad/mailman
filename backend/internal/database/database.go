@@ -38,7 +38,7 @@ func Initialize(config Config) error {
 		log.New(os.Stdout, "\r\n", log.LstdFlags),
 		logger.Config{
 			SlowThreshold:             time.Second,
-			LogLevel:                  logger.Info,
+			LogLevel:                  logger.Warn, // 改为Warn级别，减少数据库操作日志
 			IgnoreRecordNotFoundError: true,
 			Colorful:                  true,
 		},
@@ -99,6 +99,7 @@ func Migrate() error {
 		&models.EmailTrigger{},
 		&models.TriggerExecutionLog{},
 		&models.OAuth2AuthSession{},
+		&models.SystemConfig{},
 	); err != nil {
 		return fmt.Errorf("failed to migrate tables: %w", err)
 	}
@@ -146,7 +147,7 @@ func migrateOAuth2ProviderTypeConstraint() error {
 	// 检查是否存在provider_type的唯一约束（通过尝试插入重复数据来检测）
 	var count int64
 	DB.Model(&models.OAuth2GlobalConfig{}).Count(&count)
-	
+
 	// 如果表中有数据，先检查约束
 	if count > 0 {
 		// 获取现有的一条记录来测试
@@ -162,7 +163,7 @@ func migrateOAuth2ProviderTypeConstraint() error {
 				Scopes:       models.StringSlice{"test"},
 				IsEnabled:    false,
 			}
-			
+
 			// 尝试插入，如果失败说明有唯一约束
 			if err := DB.Create(&testConfig).Error; err != nil {
 				if err.Error() == "UNIQUE constraint failed: o_auth2_global_configs.provider_type" {
@@ -175,7 +176,7 @@ func migrateOAuth2ProviderTypeConstraint() error {
 			}
 		}
 	}
-	
+
 	return nil
 }
 

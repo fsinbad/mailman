@@ -9,6 +9,7 @@ import (
 	"mailman/internal/models"
 	"mailman/internal/repository"
 	"mailman/internal/services"
+	"mailman/internal/triggerv2/plugins"
 	"math/big"
 	"net/http"
 	"sort"
@@ -51,6 +52,11 @@ type APIHandler struct {
 	IncrementalSyncRepo *repository.IncrementalSyncRepository
 	EmailScheduler      *services.EmailFetchScheduler
 	activityLogger      *services.ActivityLogger
+	pluginManager       plugins.PluginManager
+
+	// 新增的同步管理器
+	optimizedSyncManager  *services.OptimizedIncrementalSyncManager
+	perAccountSyncManager *services.PerAccountSyncManager
 }
 
 func NewAPIHandler(
@@ -61,16 +67,22 @@ func NewAPIHandler(
 	emailRepo *repository.EmailRepository,
 	incrementalSyncRepo *repository.IncrementalSyncRepository,
 	emailScheduler *services.EmailFetchScheduler,
+	pluginManager plugins.PluginManager,
+	optimizedSyncManager *services.OptimizedIncrementalSyncManager,
+	perAccountSyncManager *services.PerAccountSyncManager,
 ) *APIHandler {
 	return &APIHandler{
-		Fetcher:             fetcher,
-		Parser:              parser,
-		EmailAccountRepo:    emailAccountRepo,
-		MailProviderRepo:    mailProviderRepo,
-		EmailRepo:           emailRepo,
-		IncrementalSyncRepo: incrementalSyncRepo,
-		EmailScheduler:      emailScheduler,
-		activityLogger:      services.GetActivityLogger(),
+		Fetcher:               fetcher,
+		Parser:                parser,
+		EmailAccountRepo:      emailAccountRepo,
+		MailProviderRepo:      mailProviderRepo,
+		EmailRepo:             emailRepo,
+		IncrementalSyncRepo:   incrementalSyncRepo,
+		EmailScheduler:        emailScheduler,
+		activityLogger:        services.GetActivityLogger(),
+		pluginManager:         pluginManager,
+		optimizedSyncManager:  optimizedSyncManager,
+		perAccountSyncManager: perAccountSyncManager,
 	}
 }
 
@@ -359,6 +371,141 @@ func (h *APIHandler) GetAccountsPaginatedHandler(w http.ResponseWriter, r *http.
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+// BatchVerifyAccountsRequest represents the request for batch account verification
+type BatchVerifyAccountsRequest struct {
+	AccountIDs []uint `json:"account_ids"`
+}
+
+// BatchVerifyAccountsResponse represents the response for batch account verification
+type BatchVerifyAccountsResponse struct {
+	SuccessCount int                        `json:"success_count"`
+	ErrorCount   int                        `json:"error_count"`
+	Results      []BatchVerifyAccountResult `json:"results"`
+}
+
+// BatchVerifyAccountResult represents the result for a single account verification
+type BatchVerifyAccountResult struct {
+	AccountID    uint   `json:"account_id"`
+	EmailAddress string `json:"email_address"`
+	Success      bool   `json:"success"`
+	Message      string `json:"message,omitempty"`
+	Error        string `json:"error,omitempty"`
+}
+
+// BatchVerifyAccountsHandler handles batch account verification
+// @Summary Batch verify account connectivity
+// @Description Verify connectivity for multiple email accounts in batch
+// @Tags accounts
+// @Accept json
+// @Produce json
+// @Param request body BatchVerifyAccountsRequest true "Batch account verification request"
+// @Success 200 {object} BatchVerifyAccountsResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/accounts/batch-verify [post]
+func (h *APIHandler) BatchVerifyAccountsHandler(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+
+	var req BatchVerifyAccountsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate request
+	if len(req.AccountIDs) == 0 {
+		http.Error(w, "At least one account ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Limit batch size to prevent timeout
+	const maxBatchSize = 20
+	if len(req.AccountIDs) > maxBatchSize {
+		http.Error(w, fmt.Sprintf("Batch size cannot exceed %d accounts", maxBatchSize), http.StatusBadRequest)
+		return
+	}
+
+	fmt.Printf("[DEBUG] Starting batch verification for %d accounts\n", len(req.AccountIDs))
+
+	var response BatchVerifyAccountsResponse
+	var results []BatchVerifyAccountResult
+
+	// Process each account
+	for _, accountID := range req.AccountIDs {
+		result := h.verifyAccountByID(accountID)
+		results = append(results, result)
+
+		if result.Success {
+			response.SuccessCount++
+		} else {
+			response.ErrorCount++
+		}
+
+		fmt.Printf("[DEBUG] Verified account %d (%s): success=%t\n",
+			accountID, result.EmailAddress, result.Success)
+	}
+
+	response.Results = results
+
+	fmt.Printf("[DEBUG] Batch verification completed: %d success, %d errors in %v\n",
+		response.SuccessCount, response.ErrorCount, time.Since(start))
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// verifyAccountByID verifies a single account by ID and updates verification status
+func (h *APIHandler) verifyAccountByID(accountID uint) BatchVerifyAccountResult {
+	// Get account from database
+	account, err := h.EmailAccountRepo.GetByID(accountID)
+	if err != nil {
+		return BatchVerifyAccountResult{
+			AccountID:    accountID,
+			EmailAddress: fmt.Sprintf("account_%d", accountID),
+			Success:      false,
+			Error:        "Account not found: " + err.Error(),
+		}
+	}
+
+	// Verify connection
+	err = h.Fetcher.VerifyConnection(*account)
+
+	result := BatchVerifyAccountResult{
+		AccountID:    accountID,
+		EmailAddress: account.EmailAddress,
+		Success:      err == nil,
+	}
+
+	if err != nil {
+		result.Message = "Connection verification failed"
+		result.Error = err.Error()
+		fmt.Printf("[DEBUG] Verification failed for account %d (%s): %v\n",
+			accountID, account.EmailAddress, err)
+	} else {
+		// Update account verification status in database
+		account.IsVerified = true
+		account.VerifiedAt = timePtr(time.Now())
+
+		if updateErr := h.EmailAccountRepo.Update(account); updateErr != nil {
+			fmt.Printf("[DEBUG] Failed to update verification status for account %d: %v\n",
+				accountID, updateErr)
+			result.Message = "Connection verified but failed to update database"
+			result.Error = updateErr.Error()
+		} else {
+			result.Message = "Connection verified successfully"
+			fmt.Printf("[DEBUG] Successfully verified and updated account %d (%s)\n",
+				accountID, account.EmailAddress)
+		}
+	}
+
+	return result
+}
+
+// timePtr returns a pointer to the given time
+func timePtr(t time.Time) *time.Time {
+	return &t
 }
 
 // syncEmailsForToQuery 根据to_query参数同步对应账户的邮件
@@ -3656,5 +3803,96 @@ func (h *APIHandler) GetEmailFoldersHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// ================ 同步监控相关处理器 ================
+
+// GetQueueMetricsHandler 获取队列监控指标
+func (h *APIHandler) GetQueueMetricsHandler(w http.ResponseWriter, r *http.Request) {
+	if h.optimizedSyncManager == nil {
+		http.Error(w, "Optimized sync manager not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	metrics := h.optimizedSyncManager.GetQueueMetrics()
+
+	w.Header().Set("Content-Type", "application/json")
+	response := map[string]interface{}{
+		"success": true,
+		"data":    metrics,
+	}
+
+	json.NewEncoder(w).Encode(response)
+}
+
+// GetAccountSyncStatusHandler 获取账户同步状态
+func (h *APIHandler) GetAccountSyncStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if h.perAccountSyncManager == nil {
+		http.Error(w, "Per-account sync manager not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	// 获取查询参数
+	accountIDStr := r.URL.Query().Get("account_id")
+
+	if accountIDStr != "" {
+		// 获取单个账户状态
+		accountID, err := strconv.ParseUint(accountIDStr, 10, 32)
+		if err != nil {
+			http.Error(w, "Invalid account ID", http.StatusBadRequest)
+			return
+		}
+
+		status, err := h.perAccountSyncManager.GetAccountSyncerStatus(uint(accountID))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		response := map[string]interface{}{
+			"success": true,
+			"data":    status,
+		}
+		json.NewEncoder(w).Encode(response)
+	} else {
+		// 获取所有账户状态
+		statuses := h.perAccountSyncManager.GetAllAccountSyncerStatuses()
+
+		w.Header().Set("Content-Type", "application/json")
+		response := map[string]interface{}{
+			"success": true,
+			"data":    statuses,
+		}
+		json.NewEncoder(w).Encode(response)
+	}
+}
+
+// GetSyncManagerStatsHandler 获取同步管理器统计
+func (h *APIHandler) GetSyncManagerStatsHandler(w http.ResponseWriter, r *http.Request) {
+	stats := make(map[string]interface{})
+
+	// 获取优化同步管理器统计
+	if h.optimizedSyncManager != nil {
+		stats["optimized_manager"] = h.optimizedSyncManager.GetQueueMetrics()
+	}
+
+	// 获取每账户同步管理器统计
+	if h.perAccountSyncManager != nil {
+		stats["per_account_manager"] = h.perAccountSyncManager.GetStats()
+	}
+
+	// 获取邮件调度器统计
+	if h.EmailScheduler != nil {
+		stats["email_scheduler"] = h.EmailScheduler.GetMetrics()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	response := map[string]interface{}{
+		"success": true,
+		"data":    stats,
+	}
+
 	json.NewEncoder(w).Encode(response)
 }

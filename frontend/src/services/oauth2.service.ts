@@ -139,9 +139,29 @@ export class OAuth2Service {
     }
 
     /**
-     * 检查提供商是否已配置
+     * 检查提供商是否已配置（检查是否有完整的配置）
      */
     async isProviderConfigured(provider: OAuth2ProviderType): Promise<boolean> {
+        try {
+            // 获取所有该提供商的配置
+            const configs = await this.getGlobalConfigsByProvider(provider);
+
+            // 检查是否有任何一个配置是完整且启用的
+            return configs.some(config =>
+                config.is_enabled &&
+                !!config.client_id &&
+                !!config.client_secret &&
+                !!config.redirect_uri
+            );
+        } catch (error) {
+            return false;
+        }
+    }
+
+    /**
+     * 检查提供商是否已配置（旧方法，保持向后兼容）
+     */
+    async isProviderConfiguredLegacy(provider: OAuth2ProviderType): Promise<boolean> {
         try {
             const config = await this.getGlobalConfigByProvider(provider);
             return config.is_enabled && !!config.client_id && !!config.client_secret;
@@ -179,9 +199,9 @@ export class OAuth2Service {
                 'https://www.googleapis.com/auth/userinfo.profile'
             ],
             outlook: [
-                'https://graph.microsoft.com/mail.read',
-                'https://graph.microsoft.com/mail.send',
-                'https://graph.microsoft.com/mail.readwrite'
+                'https://outlook.office.com/IMAP.AccessAsUser.All',
+                'https://outlook.office.com/SMTP.Send',
+                'offline_access'
             ]
         };
         return defaultScopes[provider] || [];

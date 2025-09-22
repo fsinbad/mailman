@@ -503,7 +503,7 @@ func (s *ExtractorService) extractWithGoTemplate(email models.Email, templateStr
 		Emails  []string
 	}{
 		Email:   &email,
-		AllText: strings.Join([]string{email.Subject, email.Body, email.HTMLBody}, " "),
+		AllText: strings.Join([]string{email.Subject, strings.Join(email.From, " "), strings.Join(email.To, " "), strings.Join(email.Cc, " "), email.Body, email.HTMLBody}, " "),
 		Links:   extractLinksFromEmail(email),
 		Emails:  extractEmailsFromEmail(email),
 	}

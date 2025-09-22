@@ -1,0 +1,514 @@
+package builtin
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"mailman/internal/triggerv2/models"
+	"mailman/internal/triggerv2/plugins"
+)
+
+// EmailAccountSetPlugin 邮箱账户集合筛选插件
+type EmailAccountSetPlugin struct {
+	info   *plugins.PluginInfo
+	config map[string]interface{}
+}
+
+// NewEmailAccountSetPlugin 创建邮箱账户集合筛选插件
+func NewEmailAccountSetPlugin() plugins.ConditionPlugin {
+	return &EmailAccountSetPlugin{
+		info: &plugins.PluginInfo{
+			ID:          "email_account_set",
+			Name:        "邮箱账户集合筛选",
+			Version:     "1.0.0",
+			Description: "筛选特定邮箱账户集合中的邮件",
+			Author:      "TriggerV2 Team",
+			Website:     "https://github.com/triggerv2/plugins",
+			License:     "MIT",
+			Type:        plugins.PluginTypeCondition,
+			Status:      plugins.PluginStatusLoaded,
+			LoadedAt:    time.Now(),
+			ConfigSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"account_emails": map[string]interface{}{
+						"type":        "array",
+						"description": "邮箱账户列表",
+						"items": map[string]interface{}{
+							"type": "string",
+						},
+					},
+					"match_type": map[string]interface{}{
+						"type":        "string",
+						"description": "匹配类型: from（发件人）, to（收件人）, both（发件人或收件人）",
+						"default":     "from",
+						"enum":        []string{"from", "to", "both"},
+					},
+					"case_sensitive": map[string]interface{}{
+						"type":        "boolean",
+						"description": "是否区分大小写",
+						"default":     false,
+					},
+					"api_endpoint": map[string]interface{}{
+						"type":        "string",
+						"description": "动态获取账户列表的API端点（可选）",
+					},
+					"api_headers": map[string]interface{}{
+						"type":        "object",
+						"description": "API请求头（可选）",
+					},
+				},
+				"required": []string{"account_emails"},
+			},
+			DefaultConfig: map[string]interface{}{
+				"account_emails": []string{},
+				"match_type":     "from",
+				"case_sensitive": false,
+				"api_endpoint":   "",
+				"api_headers":    map[string]interface{}{},
+			},
+			Dependencies: []string{},
+			Permissions:  []string{plugins.PermissionRead, plugins.PermissionNetwork},
+			Sandbox:      true,
+			MinVersion:   "1.0.0",
+			MaxVersion:   "",
+		},
+		config: make(map[string]interface{}),
+	}
+}
+
+// GetInfo 获取插件信息
+func (p *EmailAccountSetPlugin) GetInfo() *plugins.PluginInfo {
+	return p.info
+}
+
+// GetUISchema 获取UI架构
+func (p *EmailAccountSetPlugin) GetUISchema() *plugins.UISchema {
+	return &plugins.UISchema{
+		Fields: []plugins.UIField{
+			{
+				Name:         "account_emails",
+				Label:        "邮箱账户列表",
+				Type:         plugins.UIFieldTypeMultiSelect,
+				Description:  "要筛选的邮箱账户列表",
+				Placeholder:  "输入邮箱地址",
+				Required:     true,
+				Width:        "full",
+				DefaultValue: []string{},
+				OptionsAPI:   "/api/email-accounts",
+			},
+			{
+				Name:         "match_type",
+				Label:        "匹配类型",
+				Type:         plugins.UIFieldTypeSelect,
+				Description:  "指定匹配邮件的发件人还是收件人",
+				Required:     true,
+				Width:        "half",
+				DefaultValue: "from",
+				Options: []plugins.UIOption{
+					{Value: "from", Label: "发件人", Description: "匹配邮件发件人"},
+					{Value: "to", Label: "收件人", Description: "匹配邮件收件人"},
+					{Value: "both", Label: "发件人或收件人", Description: "匹配邮件发件人或收件人"},
+				},
+			},
+			{
+				Name:         "case_sensitive",
+				Label:        "区分大小写",
+				Type:         plugins.UIFieldTypeBoolean,
+				Description:  "是否区分大小写进行匹配",
+				Required:     false,
+				Width:        "half",
+				DefaultValue: false,
+			},
+			{
+				Name:        "api_endpoint",
+				Label:       "API端点",
+				Type:        plugins.UIFieldTypeText,
+				Description: "动态获取账户列表的API端点（可选）",
+				Placeholder: "例如：/api/email-accounts",
+				Required:    false,
+				Width:       "full",
+			},
+		},
+		Operators: []plugins.UIOperator{
+			{Value: "in", Label: "在列表中", ApplicableTo: []string{"multi_select"}},
+			{Value: "not_in", Label: "不在列表中", ApplicableTo: []string{"multi_select"}},
+		},
+		Layout:            "vertical",
+		AllowCustomFields: false,
+		AllowNesting:      true,
+		MaxNestingLevel:   3,
+		HelpText:          "根据邮箱账户集合筛选邮件",
+		Examples: []plugins.UIExample{
+			{
+				Title:       "筛选特定用户邮件",
+				Description: "只显示来自指定邮箱账户的邮件",
+				Expression: map[string]interface{}{
+					"account_emails": []string{"user1@example.com", "user2@example.com"},
+					"match_type":     "from",
+					"case_sensitive": false,
+				},
+			},
+		},
+	}
+}
+
+// GetDynamicOptions 获取动态选项
+func (p *EmailAccountSetPlugin) GetDynamicOptions(field string, query string) ([]plugins.UIOption, error) {
+	switch field {
+	case "account_emails":
+		// 这里可以从API或数据库获取邮箱账户列表
+		// 暂时返回示例数据
+		options := []plugins.UIOption{
+			{Value: "admin@example.com", Label: "管理员", Description: "系统管理员账户"},
+			{Value: "support@example.com", Label: "支持", Description: "技术支持账户"},
+			{Value: "noreply@example.com", Label: "无回复", Description: "系统通知账户"},
+		}
+		
+		// 如果有查询参数，进行过滤
+		if query != "" {
+			var filtered []plugins.UIOption
+			for _, opt := range options {
+				if strings.Contains(strings.ToLower(opt.Value.(string)), strings.ToLower(query)) ||
+					strings.Contains(strings.ToLower(opt.Label), strings.ToLower(query)) {
+					filtered = append(filtered, opt)
+				}
+			}
+			return filtered, nil
+		}
+		
+		return options, nil
+	default:
+		return nil, fmt.Errorf("unsupported field: %s", field)
+	}
+}
+
+// ValidateFieldValue 验证字段值
+func (p *EmailAccountSetPlugin) ValidateFieldValue(field string, value interface{}) error {
+	switch field {
+	case "account_emails":
+		if emails, ok := value.([]interface{}); ok {
+			for _, email := range emails {
+				if emailStr, ok := email.(string); ok {
+					if !isValidEmail(emailStr) {
+						return fmt.Errorf("invalid email format: %s", emailStr)
+					}
+				} else {
+					return fmt.Errorf("email must be a string")
+				}
+			}
+		} else {
+			return fmt.Errorf("account_emails must be an array")
+		}
+	case "match_type":
+		if matchType, ok := value.(string); ok {
+			validTypes := []string{"from", "to", "both"}
+			for _, validType := range validTypes {
+				if matchType == validType {
+					return nil
+				}
+			}
+			return fmt.Errorf("invalid match_type: %s", matchType)
+		} else {
+			return fmt.Errorf("match_type must be a string")
+		}
+	case "case_sensitive":
+		if _, ok := value.(bool); !ok {
+			return fmt.Errorf("case_sensitive must be a boolean")
+		}
+	default:
+		return fmt.Errorf("unsupported field: %s", field)
+	}
+	return nil
+}
+
+// GetFieldSuggestions 获取字段建议
+func (p *EmailAccountSetPlugin) GetFieldSuggestions(field string, prefix string) ([]string, error) {
+	switch field {
+	case "account_emails":
+		// 返回常见的邮箱账户建议
+		suggestions := []string{
+			"admin@example.com",
+			"support@example.com",
+			"noreply@example.com",
+			"info@example.com",
+			"sales@example.com",
+		}
+		
+		// 如果有前缀，进行过滤
+		if prefix != "" {
+			var filtered []string
+			for _, suggestion := range suggestions {
+				if strings.HasPrefix(strings.ToLower(suggestion), strings.ToLower(prefix)) {
+					filtered = append(filtered, suggestion)
+				}
+			}
+			return filtered, nil
+		}
+		
+		return suggestions, nil
+	default:
+		return nil, fmt.Errorf("unsupported field: %s", field)
+	}
+}
+
+// isValidEmail 验证邮箱格式
+func isValidEmail(email string) bool {
+	// 简单的邮箱格式验证
+	if !strings.Contains(email, "@") {
+		return false
+	}
+	parts := strings.Split(email, "@")
+	if len(parts) != 2 {
+		return false
+	}
+	return len(parts[0]) > 0 && len(parts[1]) > 0 && strings.Contains(parts[1], ".")
+}
+
+// Initialize 初始化插件
+func (p *EmailAccountSetPlugin) Initialize(ctx *plugins.PluginContext) error {
+	p.config = p.info.DefaultConfig
+	return nil
+}
+
+// Cleanup 清理插件
+func (p *EmailAccountSetPlugin) Cleanup() error {
+	return nil
+}
+
+// OnLoad 加载时回调
+func (p *EmailAccountSetPlugin) OnLoad() error {
+	return nil
+}
+
+// OnUnload 卸载时回调
+func (p *EmailAccountSetPlugin) OnUnload() error {
+	return nil
+}
+
+// OnActivate 激活时回调
+func (p *EmailAccountSetPlugin) OnActivate() error {
+	p.info.Status = plugins.PluginStatusActive
+	return nil
+}
+
+// OnDeactivate 停用时回调
+func (p *EmailAccountSetPlugin) OnDeactivate() error {
+	p.info.Status = plugins.PluginStatusInactive
+	return nil
+}
+
+// GetDefaultConfig 获取默认配置
+func (p *EmailAccountSetPlugin) GetDefaultConfig() map[string]interface{} {
+	return p.info.DefaultConfig
+}
+
+// ValidateConfig 验证配置
+func (p *EmailAccountSetPlugin) ValidateConfig(config map[string]interface{}) error {
+	// 验证账户邮箱列表
+	if emails, ok := config["account_emails"]; ok {
+		if emailList, ok := emails.([]interface{}); ok {
+			for _, email := range emailList {
+				if _, ok := email.(string); !ok {
+					return fmt.Errorf("邮箱账户必须是字符串")
+				}
+			}
+		} else {
+			return fmt.Errorf("邮箱账户必须是数组")
+		}
+	}
+
+	// 验证匹配类型
+	if matchType, ok := config["match_type"]; ok {
+		if typeStr, ok := matchType.(string); ok {
+			if typeStr != "from" && typeStr != "to" && typeStr != "both" {
+				return fmt.Errorf("匹配类型必须是 'from', 'to', 或 'both'")
+			}
+		} else {
+			return fmt.Errorf("匹配类型必须是字符串")
+		}
+	}
+
+	return nil
+}
+
+// ApplyConfig 应用配置
+func (p *EmailAccountSetPlugin) ApplyConfig(config map[string]interface{}) error {
+	if err := p.ValidateConfig(config); err != nil {
+		return err
+	}
+
+	for key, value := range config {
+		p.config[key] = value
+	}
+
+	return nil
+}
+
+// HealthCheck 健康检查
+func (p *EmailAccountSetPlugin) HealthCheck() error {
+	return nil
+}
+
+// GetMetrics 获取指标
+func (p *EmailAccountSetPlugin) GetMetrics() map[string]interface{} {
+	return map[string]interface{}{
+		"evaluations": p.info.UsageCount,
+		"last_used":   p.info.LastUsed,
+		"status":      p.info.Status,
+	}
+}
+
+// Evaluate 评估条件
+func (p *EmailAccountSetPlugin) Evaluate(ctx *plugins.PluginContext, event *models.Event) (*plugins.PluginResult, error) {
+	startTime := time.Now()
+
+	// 更新使用统计
+	p.info.UsageCount++
+	p.info.LastUsed = time.Now()
+
+	// 解析邮件事件数据
+	var emailData models.EmailEventData
+	if err := event.GetData(&emailData); err != nil {
+		return &plugins.PluginResult{
+			Success:       false,
+			Error:         fmt.Sprintf("解析邮件数据失败: %v", err),
+			ExecutionTime: time.Since(startTime),
+			Timestamp:     time.Now(),
+		}, nil
+	}
+
+	// 获取配置
+	accountEmails := p.getAccountEmails()
+	matchType := p.getMatchType()
+	caseSensitive := p.getCaseSensitive()
+
+	// 如果没有配置邮箱账户，返回 false
+	if len(accountEmails) == 0 {
+		return &plugins.PluginResult{
+			Success:       true,
+			Data:          map[string]interface{}{"matched": false, "reason": "未配置邮箱账户"},
+			ExecutionTime: time.Since(startTime),
+			Timestamp:     time.Now(),
+		}, nil
+	}
+
+	// 检查匹配
+	matched := false
+	reason := ""
+
+	switch matchType {
+	case "from":
+		matched = p.checkEmailInSet(emailData.From, accountEmails, caseSensitive)
+		if matched {
+			reason = "发件人在账户集合中"
+		}
+	case "to":
+		matched = p.checkEmailInSet(emailData.To, accountEmails, caseSensitive)
+		if matched {
+			reason = "收件人在账户集合中"
+		}
+	case "both":
+		fromMatched := p.checkEmailInSet(emailData.From, accountEmails, caseSensitive)
+		toMatched := p.checkEmailInSet(emailData.To, accountEmails, caseSensitive)
+		matched = fromMatched || toMatched
+		if fromMatched {
+			reason = "发件人在账户集合中"
+		} else if toMatched {
+			reason = "收件人在账户集合中"
+		}
+	}
+
+	result := &plugins.PluginResult{
+		Success: true,
+		Data: map[string]interface{}{
+			"matched":        matched,
+			"reason":         reason,
+			"match_type":     matchType,
+			"account_emails": accountEmails,
+			"case_sensitive": caseSensitive,
+		},
+		ExecutionTime: time.Since(startTime),
+		Timestamp:     time.Now(),
+	}
+
+	return result, nil
+}
+
+// GetDescription 获取描述
+func (p *EmailAccountSetPlugin) GetDescription() string {
+	return p.info.Description
+}
+
+// GetSupportedEventTypes 获取支持的事件类型
+func (p *EmailAccountSetPlugin) GetSupportedEventTypes() []string {
+	return []string{
+		string(models.EventTypeEmailReceived),
+		string(models.EventTypeEmailUpdated),
+	}
+}
+
+// GetRequiredFields 获取必需字段
+func (p *EmailAccountSetPlugin) GetRequiredFields() []string {
+	return []string{"from", "to"}
+}
+
+// 私有方法
+
+// getAccountEmails 获取账户邮箱配置
+func (p *EmailAccountSetPlugin) getAccountEmails() []string {
+	if emails, ok := p.config["account_emails"]; ok {
+		if emailList, ok := emails.([]interface{}); ok {
+			result := make([]string, 0, len(emailList))
+			for _, email := range emailList {
+				if str, ok := email.(string); ok {
+					result = append(result, str)
+				}
+			}
+			return result
+		}
+	}
+	return []string{}
+}
+
+// getMatchType 获取匹配类型配置
+func (p *EmailAccountSetPlugin) getMatchType() string {
+	if matchType, ok := p.config["match_type"]; ok {
+		if str, ok := matchType.(string); ok {
+			return str
+		}
+	}
+	return "from"
+}
+
+// getCaseSensitive 获取大小写敏感配置
+func (p *EmailAccountSetPlugin) getCaseSensitive() bool {
+	if caseSensitive, ok := p.config["case_sensitive"]; ok {
+		if b, ok := caseSensitive.(bool); ok {
+			return b
+		}
+	}
+	return false
+}
+
+// checkEmailInSet 检查邮箱是否在集合中
+func (p *EmailAccountSetPlugin) checkEmailInSet(email string, accountEmails []string, caseSensitive bool) bool {
+	checkEmail := email
+	if !caseSensitive {
+		checkEmail = strings.ToLower(email)
+	}
+
+	for _, accountEmail := range accountEmails {
+		compareEmail := accountEmail
+		if !caseSensitive {
+			compareEmail = strings.ToLower(accountEmail)
+		}
+
+		if checkEmail == compareEmail {
+			return true
+		}
+	}
+
+	return false
+}

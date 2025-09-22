@@ -62,6 +62,19 @@ const (
 	ProviderTypeCustom  MailProviderType = "custom"
 )
 
+// AccountErrorStatus 账户错误状态
+type AccountErrorStatus string
+
+const (
+	ErrorStatusNormal        AccountErrorStatus = "normal"         // 正常状态
+	ErrorStatusOAuthExpired  AccountErrorStatus = "oauth_expired"  // OAuth Token过期
+	ErrorStatusAuthRevoked   AccountErrorStatus = "auth_revoked"   // 授权被撤销
+	ErrorStatusAPIDisabled   AccountErrorStatus = "api_disabled"   // API被禁用
+	ErrorStatusNetworkError  AccountErrorStatus = "network_error"  // 网络错误
+	ErrorStatusQuotaExceeded AccountErrorStatus = "quota_exceeded" // 配额超限
+	ErrorStatusServerError   AccountErrorStatus = "server_error"   // 服务器错误
+)
+
 // MailProvider stores the configuration for a specific email provider.
 type MailProvider struct {
 	ID         uint             `gorm:"primaryKey" json:"id"`
@@ -110,17 +123,12 @@ func (m *JSONMap) Scan(value interface{}) error {
 		return nil
 	}
 
-	// Debug: Log the value type and content
-	fmt.Printf("[DEBUG JSONMap.Scan] value type: %T, value: %v\n", value, value)
-
 	bytes, ok := value.([]byte)
 	if !ok {
 		// Try string type as well
 		if str, isString := value.(string); isString {
 			bytes = []byte(str)
-			fmt.Printf("[DEBUG JSONMap.Scan] Converted string to bytes: %s\n", string(bytes))
 		} else {
-			fmt.Printf("[DEBUG JSONMap.Scan] Cannot convert value to bytes, type: %T\n", value)
 			return fmt.Errorf("cannot convert value to bytes, got type %T", value)
 		}
 	}
@@ -131,11 +139,8 @@ func (m *JSONMap) Scan(value interface{}) error {
 	}
 
 	if err := json.Unmarshal(bytes, m); err != nil {
-		fmt.Printf("[DEBUG JSONMap.Scan] JSON unmarshal error: %v, bytes: %s\n", err, string(bytes))
 		return err
 	}
-
-	fmt.Printf("[DEBUG JSONMap.Scan] Successfully parsed JSON: %+v\n", *m)
 	return nil
 }
 
@@ -152,10 +157,10 @@ type EmailAccount struct {
 	ID               uint                `gorm:"primaryKey" json:"id"`
 	EmailAddress     string              `gorm:"uniqueIndex;not null;type:varchar(255)" json:"emailAddress"`
 	AuthType         AuthType            `gorm:"not null;default:'password'" json:"authType"`
-	Password         string              `json:"password,omitempty"` // For AuthTypePassword
-	Token            string              `json:"token,omitempty"`    // For AuthTypeToken
+	Password         string              `json:"password,omitempty"`                                                                                         // For AuthTypePassword
+	Token            string              `json:"token,omitempty"`                                                                                            // For AuthTypeToken
 	MailProviderID   *uint               `gorm:"index" json:"mailProviderId,omitempty"`                                                                      // Make optional - only for accounts that need predefined providers
-	MailProvider     *MailProvider       `gorm:"foreignKey:MailProviderID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;" json:"mailProvider,omitempty"` // Make optional
+	MailProvider     *MailProvider       `gorm:"foreignKey:MailProviderID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;" json:"mailProvider,omitempty"`     // Make optional
 	OAuth2ProviderID *uint               `gorm:"index" json:"oauth2ProviderId,omitempty"`                                                                    // For OAuth2 authentication, references OAuth2GlobalConfig
 	OAuth2Provider   *OAuth2GlobalConfig `gorm:"foreignKey:OAuth2ProviderID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;" json:"oauth2Provider,omitempty"` // OAuth2配置关联
 	Proxy            string              `json:"proxy,omitempty"`                                                                                            // e.g., "socks5://user:pass@host:port"
@@ -165,46 +170,61 @@ type EmailAccount struct {
 	LastSyncAt       *time.Time          `json:"lastSyncAt,omitempty"`
 	IsVerified       bool                `gorm:"default:false" json:"isVerified"`
 	VerifiedAt       *time.Time          `json:"verifiedAt,omitempty"`
-	CreatedAt        time.Time           `json:"createdAt"`
-	UpdatedAt        time.Time           `json:"updatedAt"`
-	DeletedAt        DeletedAt           `gorm:"index" json:"deletedAt,omitempty"`
+
+	// 错误状态管理字段
+	ErrorStatus    string     `gorm:"default:'normal'" json:"errorStatus"` // normal, oauth_expired, auth_revoked, api_disabled, network_error
+	ErrorMessage   string     `gorm:"type:text" json:"errorMessage"`       // 详细错误信息
+	ErrorTimestamp *time.Time `json:"errorTimestamp,omitempty"`            // 最后错误发生时间
+	ErrorCount     int        `gorm:"default:0" json:"errorCount"`         // 累计错误次数
+	AutoDisabledAt *time.Time `json:"autoDisabledAt,omitempty"`            // 自动禁用时间
+
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+	DeletedAt DeletedAt `gorm:"index" json:"deletedAt,omitempty"`
 }
 
 // Email represents a single email message.
 type Email struct {
-	ID          uint         `gorm:"primaryKey"`
-	MessageID   string       `gorm:"index"` // RFC Message-ID
-	AccountID   uint         `gorm:"not null"`
-	Account     EmailAccount `gorm:"foreignKey:AccountID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
-	Subject     string
-	From        StringSlice `gorm:"type:json"`
-	To          StringSlice `gorm:"type:json"`
-	Cc          StringSlice `gorm:"type:json"`
-	Bcc         StringSlice `gorm:"type:json"`
-	Date        time.Time   `gorm:"index"`
-	Body        string      `gorm:"type:text"`
-	HTMLBody    string      `gorm:"type:text"`
-	RawMessage  string      `gorm:"type:longtext"` // 存储原始邮件报文
-	Attachments []Attachment
-	MailboxName string      `gorm:"index"`     // IMAP mailbox name
-	Flags       StringSlice `gorm:"type:json"` // IMAP flags
-	Size        int64
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	DeletedAt   *DeletedAt `gorm:"index"`
+	ID             uint         `gorm:"primaryKey"`
+	MessageID      string       `gorm:"index"` // RFC Message-ID
+	AccountID      uint         `gorm:"not null"`
+	Account        EmailAccount `gorm:"foreignKey:AccountID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
+	Subject        string
+	From           StringSlice `gorm:"type:json"`
+	To             StringSlice `gorm:"type:json"`
+	Cc             StringSlice `gorm:"type:json"`
+	Bcc            StringSlice `gorm:"type:json"`
+	Date           time.Time   `gorm:"index"`
+	ReceivedAt     time.Time   `gorm:"index"` // 接收时间
+	Body           string      `gorm:"type:text"`
+	TextBody       string      `gorm:"type:text"` // 纯文本内容
+	HTMLBody       string      `gorm:"type:text"`
+	RawMessage     string      `gorm:"type:longtext"` // 存储原始邮件报文
+	InReplyTo      string      // In-Reply-To header
+	References     StringSlice `gorm:"type:json"` // References header
+	Headers        JSONMap     `gorm:"type:json"` // 其他邮件头
+	Attachments    []Attachment
+	HasAttachments bool        // 是否有附件
+	MailboxName    string      `gorm:"index"`     // IMAP mailbox name
+	Flags          StringSlice `gorm:"type:json"` // IMAP flags
+	Size           int64
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	DeletedAt      *DeletedAt `gorm:"index"`
 }
 
 // Attachment represents an email attachment.
 type Attachment struct {
-	ID        uint   `gorm:"primaryKey"`
-	EmailID   uint   `gorm:"not null"`
-	Email     Email  `gorm:"foreignKey:EmailID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
-	Filename  string `gorm:"not null"`
-	Content   []byte `gorm:"type:blob"`
-	MIMEType  string
-	Size      int64
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID          uint   `gorm:"primaryKey"`
+	EmailID     uint   `gorm:"not null"`
+	Email       Email  `gorm:"foreignKey:EmailID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;"`
+	Filename    string `gorm:"not null"`
+	Content     []byte `gorm:"type:blob"`
+	MIMEType    string
+	ContentType string // 内容类型
+	Size        int64
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // Mailbox represents a mailbox on the IMAP server.
@@ -334,10 +354,47 @@ type AIGeneratedTemplate struct {
 	DeletedAt        DeletedAt                `gorm:"index" json:"deleted_at,omitempty"`
 }
 
+// PluginInfo 插件信息
+type PluginInfo struct {
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Schema      map[string]interface{} `json:"schema"`
+}
+
+// ConditionInfo 条件信息
+type ConditionInfo struct {
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Category    string                 `json:"category"`
+	Type        string                 `json:"type"`
+	Schema      map[string]interface{} `json:"schema"`
+}
+
+// Trigger 触发器（V1版本，用于兼容）
+type Trigger struct {
+	ID                uint                   `gorm:"primaryKey" json:"id"`
+	UserID            uint                   `gorm:"not null;index" json:"user_id"`
+	Name              string                 `gorm:"not null" json:"name"`
+	Description       string                 `json:"description"`
+	Status            TriggerStatus          `gorm:"default:'active'" json:"status"`
+	Enabled           bool                   `gorm:"default:true" json:"enabled"`
+	Conditions        TriggerConditionConfig `gorm:"type:json" json:"conditions"`
+	Actions           []TriggerActionConfig  `gorm:"type:json" json:"actions"`
+	Priority          int                    `gorm:"default:0" json:"priority"`
+	TotalExecutions   int64                  `gorm:"default:0" json:"total_executions"`
+	SuccessExecutions int64                  `gorm:"default:0" json:"success_executions"`
+	LastExecutedAt    *time.Time             `json:"last_executed_at,omitempty"`
+	LastError         string                 `json:"last_error,omitempty"`
+	CreatedAt         time.Time              `json:"created_at"`
+	UpdatedAt         time.Time              `json:"updated_at"`
+}
+
 // OAuth2GlobalConfig represents global OAuth2 configuration for different providers
 type OAuth2GlobalConfig struct {
 	ID           uint             `gorm:"primaryKey" json:"id"`
-	Name         string           `gorm:"uniqueIndex;type:varchar(255)" json:"name"`   // 配置名称，用于区分不同的OAuth2配置
+	Name         string           `gorm:"uniqueIndex;type:varchar(255)" json:"name"`            // 配置名称，用于区分不同的OAuth2配置
 	ProviderType MailProviderType `gorm:"type:varchar(50);not null;index" json:"provider_type"` // 去掉唯一约束，改为普通索引
 	ClientID     string           `gorm:"not null" json:"client_id"`
 	ClientSecret string           `gorm:"not null" json:"client_secret"`

@@ -41,6 +41,22 @@ export interface UpdateSyncConfigRequest {
     sync_folders?: string[]
 }
 
+export interface BatchSyncConfigRequest {
+    enable_auto_sync: boolean
+    sync_interval: number
+    sync_folders?: string[]
+}
+
+export interface BatchSyncConfigResponse {
+    success_count: number
+    error_count: number
+    errors: Array<{
+        account_id: number
+        email_address: string
+        error: string
+    }>
+}
+
 export const syncConfigService = {
     // 获取账户的同步配置
     async getAccountSyncConfig(accountId: number): Promise<SyncConfig> {
@@ -109,6 +125,15 @@ export const syncConfigService = {
         max_emails_per_sync?: number
     }): Promise<any> {
         const response = await apiClient.put('/sync/global-config', data)
+        return response
+    },
+
+    // 批量创建或更新账户同步配置
+    async batchCreateOrUpdateAccountSyncConfig(accountIds: number[], data: BatchSyncConfigRequest): Promise<BatchSyncConfigResponse> {
+        const response = await apiClient.post<BatchSyncConfigResponse>('/sync/batch-config', {
+            account_ids: accountIds,
+            ...data
+        })
         return response
     }
 }

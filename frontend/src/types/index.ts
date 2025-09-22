@@ -433,6 +433,32 @@ export interface TriggerStatistics {
     partial_executions: number
     avg_execution_time: number
     success_rate: number
+    max_execution_time: number
+    min_execution_time: number
+    avg_condition_time: number
+    avg_action_time: number
+    execution_time_percentiles: {
+        p50: number
+        p90: number
+        p95: number
+        p99: number
+    }
+    resource_usage?: {
+        avg_memory_mb: number
+        max_memory_mb: number
+        avg_cpu_percent: number
+        max_cpu_percent: number
+    }
+    time_distribution?: {
+        labels: string[]
+        values: number[]
+    }
+    executions_by_day?: {
+        dates: string[]
+        counts: number[]
+        success_counts: number[]
+        failed_counts: number[]
+    }
 }
 
 // OAuth2 Types

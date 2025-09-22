@@ -16,6 +16,13 @@ import {
     Key,
     Plus,
     RefreshCw,
+    Zap,
+    PlusCircle,
+    Sparkles,
+    BarChart3,
+    TestTube,
+    PlayCircle,
+    Bug,
 } from 'lucide-react'
 
 interface Tab {
@@ -33,10 +40,21 @@ const tabConfig: Tab[] = [
     // 根据需求隐藏订阅管理菜单项
     // { id: 'subscriptions', name: '订阅管理', icon: Bell },
     { id: 'pickup', name: '取件模板', icon: FileText },
+    // 高级触发器菜单组
+    { id: 'trigger-demo', name: '系统演示', icon: PlayCircle },
+    { id: 'triggers', name: '触发器管理', icon: Zap },
+    { id: 'trigger-create', name: '创建新规则', icon: PlusCircle },
+    { id: 'trigger-templates', name: '规则模板', icon: Sparkles },
+    { id: 'trigger-stats', name: '执行统计', icon: BarChart3 },
+    { id: 'trigger-test', name: '测试调试', icon: TestTube },
     { id: 'oauth2-config', name: 'OAuth2 配置', icon: Key },
     { id: 'ai-config', name: 'AI 配置', icon: Bot },
     { id: 'user-sessions', name: '访问令牌', icon: Settings },
     // { id: 'settings', name: '设置', icon: Settings },
+    // 开发者模式菜单项
+    { id: 'expression-debugger', name: '表达式调试器', icon: Bug },
+    { id: 'action-debugger', name: '动作调试器', icon: PlayCircle },
+    { id: 'filter-action-trigger', name: '过滤动作触发器', icon: Zap },
 ]
 
 interface TabManagerProps {
@@ -69,7 +87,7 @@ export function TabManager({
             }
             // 切换到邮箱账户管理tab
             onTabChange('accounts')
-            
+
             // 通知邮箱账户管理页面进行过滤
             const filterEvent = new CustomEvent('filterAccountsByProvider', {
                 detail: event.detail

@@ -72,6 +72,7 @@ export default function AddAccountModal({
     const [loadingProviders, setLoadingProviders] = useState(true)
     const [isTabTransitioning, setIsTabTransitioning] = useState(false)
     const [gmailOAuth2Available, setGmailOAuth2Available] = useState(false)
+    const [outlookOAuth2Available, setOutlookOAuth2Available] = useState(false)
     const [showOAuth2Popup, setShowOAuth2Popup] = useState(false)
     const [oauth2Configs, setOauth2Configs] = useState<any[]>([])
     const [loadingOAuth2Configs, setLoadingOAuth2Configs] = useState(false)
@@ -101,7 +102,7 @@ export default function AddAccountModal({
     // 单独添加的一键解析
     const [singleParseText, setSingleParseText] = useState('')
     const [showSingleParse, setShowSingleParse] = useState(false)
-    const [gettingGmailAuth, setGettingGmailAuth] = useState(false)
+    const [gettingOAuth2Auth, setGettingOAuth2Auth] = useState(false)
 
     // 批量添加
     const [batchAuthType] = useState<'token'>('token')
@@ -158,7 +159,7 @@ export default function AddAccountModal({
                 if (autoTriggerOAuth2 && presetAuthType === 'oauth2') {
                     // 延迟0.2秒后自动触发OAuth2授权
                     setTimeout(() => {
-                        handleGmailOAuth2Auth()
+                        handleOAuth2Auth()
                     }, 200)
                 }
             }
@@ -195,14 +196,17 @@ export default function AddAccountModal({
                 await loadOAuth2Configs(data[0].type)
             }
 
-            // 检查Gmail OAuth2是否已配置
+            // 检查OAuth2配置是否已配置
             try {
                 const configs = await oauth2Service.getGlobalConfigs()
                 const gmailConfig = configs.find(config => config.provider_type === 'gmail')
+                const outlookConfig = configs.find(config => config.provider_type === 'outlook')
                 setGmailOAuth2Available(!!gmailConfig && gmailConfig.is_enabled)
+                setOutlookOAuth2Available(!!outlookConfig && outlookConfig.is_enabled)
             } catch (error) {
-                console.error('Failed to check Gmail OAuth2 configuration:', error)
+                console.error('Failed to check OAuth2 configuration:', error)
                 setGmailOAuth2Available(false)
+                setOutlookOAuth2Available(false)
             }
         } catch (error) {
             console.error('Failed to load providers:', error)
@@ -248,7 +252,7 @@ export default function AddAccountModal({
     const supportsOAuth2 = () => {
         const provider = getSelectedProvider()
         if (provider?.type === 'outlook') {
-            return true // Outlook 默认支持OAuth2
+            return outlookOAuth2Available // Outlook 需要检查系统是否已配置OAuth2
         }
         if (provider?.type === 'gmail') {
             // Gmail 需要检查系统是否已配置OAuth2
@@ -257,17 +261,17 @@ export default function AddAccountModal({
         return false
     }
 
-    // 获取Gmail OAuth2授权 - 使用popup方式
-    const handleGmailOAuth2Auth = async () => {
+    // 获取OAuth2授权 - 使用popup方式，支持Gmail和Outlook
+    const handleOAuth2Auth = async () => {
         if (!selectedProvider) return
 
         try {
-            setGettingGmailAuth(true)
+            setGettingOAuth2Auth(true)
 
-            // 检查是否为Gmail提供商
+            // 检查是否为支持的提供商
             const provider = getSelectedProvider()
-            if (provider?.type !== 'gmail') {
-                setGettingGmailAuth(false)
+            if (provider?.type !== 'gmail' && provider?.type !== 'outlook') {
+                setGettingOAuth2Auth(false)
                 return
             }
 
@@ -276,7 +280,7 @@ export default function AddAccountModal({
         } catch (err) {
             console.error('OAuth2 authorization error:', err)
             onError?.('启动OAuth2授权失败')
-            setGettingGmailAuth(false)
+            setGettingOAuth2Auth(false)
         }
     }
 
@@ -284,7 +288,7 @@ export default function AddAccountModal({
     const handleOAuth2Success = async (result: { emailAddress: string; customSettings: any }) => {
         try {
             setShowOAuth2Popup(false)
-            setGettingGmailAuth(false)
+            setGettingOAuth2Auth(false)
 
             // 将OAuth2授权结果回填到表单
             const newFormData = {
@@ -312,13 +316,13 @@ export default function AddAccountModal({
     // OAuth2授权取消回调
     const handleOAuth2Cancel = () => {
         setShowOAuth2Popup(false)
-        setGettingGmailAuth(false)
+        setGettingOAuth2Auth(false)
     }
 
     // OAuth2授权失败回调
     const handleOAuth2Error = (error: string) => {
         setShowOAuth2Popup(false)
-        setGettingGmailAuth(false)
+        setGettingOAuth2Auth(false)
         onError?.(error)
     }
 
@@ -830,11 +834,11 @@ export default function AddAccountModal({
                                                                     </p>
                                                                     <button
                                                                         type="button"
-                                                                        onClick={handleGmailOAuth2Auth}
-                                                                        disabled={gettingGmailAuth}
+                                                                        onClick={handleOAuth2Auth}
+                                                                        disabled={gettingOAuth2Auth}
                                                                         className="w-full rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-50"
                                                                     >
-                                                                        {gettingGmailAuth ? '获取中...' : '获取Gmail授权'}
+                                                                        {gettingOAuth2Auth ? '获取中...' : (getSelectedProvider()?.type === 'outlook' ? '获取Outlook授权' : '获取Gmail授权')}
                                                                     </button>
                                                                 </div>
                                                             )}

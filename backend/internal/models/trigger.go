@@ -3,6 +3,7 @@ package models
 import (
 	"database/sql/driver"
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -39,29 +40,55 @@ type TriggerActionConfig struct {
 	Order       int               `json:"order"`                 // 执行顺序
 }
 
-// TriggerActions 触发动作数组
-type TriggerActions []TriggerActionConfig
+// TriggerActionsV1 触发动作数组 (V1 API)
+// NOTE: V2 API uses a different TriggerActions type in email_trigger_v2.go
+type TriggerActionsV1 []TriggerActionConfig
 
 // Scan implements the sql.Scanner interface
-func (ta *TriggerActions) Scan(value interface{}) error {
+func (ta *TriggerActionsV1) Scan(value interface{}) error {
 	if value == nil {
 		*ta = []TriggerActionConfig{}
 		return nil
 	}
 	bytes, ok := value.([]byte)
 	if !ok {
+		return fmt.Errorf("cannot scan %T into TriggerActionsV1", value)
+	}
+	if len(bytes) == 0 {
+		*ta = []TriggerActionConfig{}
 		return nil
 	}
 	return json.Unmarshal(bytes, ta)
 }
 
 // Value implements the driver.Valuer interface
-func (ta TriggerActions) Value() (driver.Value, error) {
+func (ta TriggerActionsV1) Value() (driver.Value, error) {
 	if len(ta) == 0 {
 		return "[]", nil
 	}
 	return json.Marshal(ta)
 }
+
+// // Scan implements the sql.Scanner interface
+// func (ta *TriggerActions) Scan(value interface{}) error {
+// 	if value == nil {
+// 		*ta = []TriggerActionConfig{}
+// 		return nil
+// 	}
+// 	bytes, ok := value.([]byte)
+// 	if !ok {
+// 		return nil
+// 	}
+// 	return json.Unmarshal(bytes, ta)
+// }
+
+// // Value implements the driver.Valuer interface
+// func (ta TriggerActions) Value() (driver.Value, error) {
+// 	if len(ta) == 0 {
+// 		return "[]", nil
+// 	}
+// 	return json.Marshal(ta)
+// }
 
 // EmailTrigger 邮件触发器
 type EmailTrigger struct {
@@ -88,7 +115,7 @@ type EmailTrigger struct {
 
 	// 触发条件和动作
 	Condition TriggerConditionConfig `gorm:"type:json;not null" json:"condition"` // 触发条件
-	Actions   TriggerActions         `gorm:"type:json;not null" json:"actions"`   // 触发动作
+	Actions   TriggerActionsV1       `gorm:"type:json;not null" json:"actions"`   // 触发动作
 
 	// 日志配置
 	EnableLogging bool `gorm:"default:true" json:"enable_logging"` // 是否启用日志

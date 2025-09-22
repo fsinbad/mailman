@@ -17,8 +17,19 @@ type EmailAccountSyncConfig struct {
 	LastSyncError     string      `json:"last_sync_error,omitempty"`
 	SyncStatus        string      `gorm:"default:idle" json:"sync_status"` // idle, syncing, error
 	LastHistoryID     string      `json:"last_history_id,omitempty"`       // Gmail API History ID for incremental sync
-	CreatedAt         time.Time   `json:"created_at"`
-	UpdatedAt         time.Time   `json:"updated_at"`
+
+	// 自动禁用相关字段
+	AutoDisabled      bool       `gorm:"default:false" json:"auto_disabled"`      // 是否因错误自动禁用同步
+	DisableReason     string     `gorm:"type:varchar(255)" json:"disable_reason"` // 自动禁用原因
+	ConsecutiveErrors int        `gorm:"default:0" json:"consecutive_errors"`     // 连续错误次数
+	LastErrorTime     *time.Time `json:"last_error_time,omitempty"`               // 最后错误时间
+
+	// 恢复相关字段
+	RecoveryAttempts    int        `gorm:"default:0" json:"recovery_attempts"` // 恢复尝试次数
+	LastRecoveryAttempt *time.Time `json:"last_recovery_attempt,omitempty"`    // 最后恢复尝试时间
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 
 	// Associations
 	Account EmailAccount `gorm:"foreignKey:AccountID;constraint:OnDelete:CASCADE" json:"account,omitempty"`

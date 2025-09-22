@@ -690,7 +690,9 @@ func (h *OAuth2Handler) RefreshTokenHandler(w http.ResponseWriter, r *http.Reque
 	var request struct {
 		Provider     string `json:"provider"`
 		RefreshToken string `json:"refresh_token"`
-		ConfigID     *uint  `json:"config_id,omitempty"` // Optional: specific OAuth2 config to use
+		ConfigID     *uint  `json:"config_id,omitempty"`  // Optional: specific OAuth2 config to use
+		AccountID    *uint  `json:"account_id,omitempty"` // Optional: account ID for better caching
+		Proxy        string `json:"proxy,omitempty"`      // Optional: proxy settings
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -739,14 +741,23 @@ func (h *OAuth2Handler) RefreshTokenHandler(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	newAccessToken, err := h.oauth2Service.RefreshAccessTokenForProvider(
+	// Use cached method with concurrency protection to avoid "invalid_grant" errors
+	// when multiple processes try to refresh tokens simultaneously
+	accountID := uint(0)
+	if request.AccountID != nil {
+		accountID = *request.AccountID
+	}
+
+	newAccessToken, err := h.oauth2Service.RefreshAccessTokenWithCacheAndProxy(
 		request.Provider,
 		config.ClientID,
 		config.ClientSecret,
 		request.RefreshToken,
+		accountID,
+		request.Proxy,
 	)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("failed to refresh access token: %v", err), http.StatusInternalServerError)
 		return
 	}
 

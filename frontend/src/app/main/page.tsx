@@ -21,6 +21,8 @@ import SyncConfigTab from '@/components/tabs/sync-config-tab'
 import UserSessionsTab from '@/components/tabs/user-sessions-tab'
 import { TriggersTab } from '@/components/tabs/triggers-tab'
 import OAuth2ConfigTab from '@/components/tabs/oauth2-config-tab'
+import PluginsTab from '@/components/tabs/plugins-tab'
+import SystemConfigTab from '@/components/tabs/system-config-tab'
 import { cn } from '@/lib/utils'
 import { registerTabCallback, unregisterTabCallback } from '@/lib/tab-utils'
 
@@ -74,7 +76,12 @@ export default function MainPage() {
                         content = <PickupTab key={tabId} />
                         break
                     case 'triggers':
-                        content = <TriggersTab key={tabId} />
+                    case 'trigger-demo':
+                    case 'trigger-create':
+                    case 'trigger-templates':
+                    case 'trigger-stats':
+                    case 'trigger-test':
+                        content = <TriggersTab key={tabId} tabId={tabId} />
                         break
                     case 'oauth2-config':
                         content = <OAuth2ConfigTab key={tabId} />
@@ -88,6 +95,28 @@ export default function MainPage() {
                         break
                     case 'user-sessions':
                         content = <UserSessionsTab key={tabId} />
+                        break
+                    case 'plugins':
+                        content = <PluginsTab key={tabId} />
+                        break
+                    case 'system-config':
+                        content = <SystemConfigTab key={tabId} />
+                        break
+                    case 'classic-mailbox':
+                        const ClassicMailboxView = require('@/components/mailbox/classic-mailbox-view').default
+                        content = <ClassicMailboxView key={tabId} />
+                        break
+                    case 'expression-debugger':
+                        const ExpressionDebuggerPage = require('@/app/dev/expression-debugger/page').default
+                        content = <ExpressionDebuggerPage key={tabId} />
+                        break
+                    case 'action-debugger':
+                        const ActionDebuggerPage = require('@/app/dev/action-debugger/page').default
+                        content = <ActionDebuggerPage key={tabId} />
+                        break
+                    case 'filter-action-trigger':
+                        const FilterActionTriggerPage = require('@/app/dev/filter-action-trigger/page').default
+                        content = <FilterActionTriggerPage key={tabId} />
                         break
                     default:
                         content = <DashboardTab key={tabId} />

@@ -48,6 +48,34 @@ func (r *OAuth2GlobalConfigRepository) GetByProviderType(providerType models.Mai
 	return &config, nil
 }
 
+// GetCompleteConfigByProviderType retrieves a complete OAuth2 global config by provider type
+// 优先返回配置完整的记录（有client_id、client_secret和redirect_uri）
+func (r *OAuth2GlobalConfigRepository) GetCompleteConfigByProviderType(providerType models.MailProviderType) (*models.OAuth2GlobalConfig, error) {
+	var config models.OAuth2GlobalConfig
+	
+	// 首先尝试获取配置完整的记录
+	err := r.db.Where("provider_type = ? AND is_enabled = ? AND client_id != '' AND client_secret != '' AND redirect_uri != ''",
+		providerType, true).First(&config).Error
+	
+	if err == nil {
+		return &config, nil
+	}
+	
+	// 如果没有找到完整配置，则返回任何启用的配置（包括空配置）
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		err = r.db.Where("provider_type = ? AND is_enabled = ?", providerType, true).First(&config).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, errors.New("OAuth2 global config not found")
+			}
+			return nil, err
+		}
+		return &config, nil
+	}
+	
+	return nil, err
+}
+
 // GetByName retrieves an OAuth2 global config by name
 func (r *OAuth2GlobalConfigRepository) GetByName(name string) (*models.OAuth2GlobalConfig, error) {
 	var config models.OAuth2GlobalConfig
@@ -121,22 +149,41 @@ func (r *OAuth2GlobalConfigRepository) CreateOrUpdate(config *models.OAuth2Globa
 
 // SeedDefaultConfigs seeds the database with default OAuth2 configs
 func (r *OAuth2GlobalConfigRepository) SeedDefaultConfigs() error {
-	// Check if Gmail config already exists
+	// Check and create Gmail config
 	_, err := r.GetByProviderType(models.ProviderTypeGmail)
-	if err == nil {
-		// Already exists, skip seeding
-		return nil
+	if err != nil {
+		// Create default Gmail config (disabled by default)
+		gmailConfig := &models.OAuth2GlobalConfig{
+			Name:         "Gmail 默认配置",
+			ProviderType: models.ProviderTypeGmail,
+			ClientID:     "",
+			ClientSecret: "",
+			RedirectURI:  "",
+			Scopes:       models.StringSlice{"https://mail.google.com/", "https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile"},
+			IsEnabled:    false,
+		}
+		if err := r.Create(gmailConfig); err != nil {
+			return err
+		}
 	}
 
-	// Create default Gmail config (disabled by default)
-	gmailConfig := &models.OAuth2GlobalConfig{
-		ProviderType: models.ProviderTypeGmail,
-		ClientID:     "",
-		ClientSecret: "",
-		RedirectURI:  "",
-		Scopes:       models.StringSlice{"https://mail.google.com/"},
-		IsEnabled:    false,
+	// Check and create Outlook config
+	_, err = r.GetByProviderType(models.ProviderTypeOutlook)
+	if err != nil {
+		// Create default Outlook config (disabled by default)
+		outlookConfig := &models.OAuth2GlobalConfig{
+			Name:         "Outlook 默认配置",
+			ProviderType: models.ProviderTypeOutlook,
+			ClientID:     "",
+			ClientSecret: "",
+			RedirectURI:  "",
+			Scopes:       models.StringSlice{"https://outlook.office.com/IMAP.AccessAsUser.All", "https://outlook.office.com/SMTP.Send", "offline_access"},
+			IsEnabled:    false,
+		}
+		if err := r.Create(outlookConfig); err != nil {
+			return err
+		}
 	}
 
-	return r.Create(gmailConfig)
+	return nil
 }

@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { X, ExternalLink, RefreshCw, CheckCircle, XCircle, Clock } from 'lucide-react'
+import { X, ExternalLink, RefreshCw, CheckCircle, XCircle, Clock, Copy, Settings, AlertCircle } from 'lucide-react'
 import { oauth2Service } from '@/services/oauth2.service'
+import { systemConfigService } from '@/services/system-config.service'
 import { OAuth2ProviderType } from '@/types'
 import { motion, AnimatePresence } from 'framer-motion'
 
@@ -27,22 +28,87 @@ export default function OAuth2PopupAuth({ provider, configId, onSuccess, onCance
     const [errorMessage, setErrorMessage] = useState<string>('')
     const [timeRemaining, setTimeRemaining] = useState<number>(0)
 
+    // 配置状态
+    const [autoOpenWindow, setAutoOpenWindow] = useState<boolean | null>(null) // 初始为null表示未加载
+    const [copySuccess, setCopySuccess] = useState<boolean>(false)
+
     const popupRef = useRef<Window | null>(null)
     const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
     const timeIntervalRef = useRef<NodeJS.Timeout | null>(null)
     const popupCheckIntervalRef = useRef<NodeJS.Timeout | null>(null)
     const authStartedRef = useRef<boolean>(false)
 
+    // 从系统配置加载OAuth2自动打开设置
+    useEffect(() => {
+        loadAutoOpenConfig()
+    }, [])
+
+    const loadAutoOpenConfig = async () => {
+        try {
+            console.log('[OAuth2PopupAuth] 开始加载OAuth2自动打开配置...')
+            const autoOpen = await systemConfigService.getOAuth2AutoOpenConfig()
+            console.log('[OAuth2PopupAuth] 配置加载完成，autoOpen:', autoOpen, 'type:', typeof autoOpen)
+            setAutoOpenWindow(autoOpen)
+            console.log('[OAuth2PopupAuth] autoOpenWindow状态已更新为:', autoOpen)
+        } catch (error) {
+            console.error('[OAuth2PopupAuth] 加载配置失败，使用默认值:', error)
+            setAutoOpenWindow(true) // 默认值
+        }
+    }
+
+    // 保存自动打开配置（系统配置版本）
+    const saveAutoOpenConfig = async (value: boolean) => {
+        try {
+            await systemConfigService.setOAuth2AutoOpenConfig(value)
+            setAutoOpenWindow(value)
+        } catch (error) {
+            console.error('Failed to save OAuth2 auto-open config:', error)
+        }
+    }
+
+    // 复制授权链接到剪贴板
+    const copyAuthUrl = async () => {
+        if (!session?.authUrl) return
+
+        try {
+            await navigator.clipboard.writeText(session.authUrl)
+            setCopySuccess(true)
+            setTimeout(() => setCopySuccess(false), 2000)
+        } catch (error) {
+            console.error('Failed to copy URL:', error)
+            // 回退方案：使用临时textarea
+            const textarea = document.createElement('textarea')
+            textarea.value = session.authUrl
+            document.body.appendChild(textarea)
+            textarea.select()
+            document.execCommand('copy')
+            document.body.removeChild(textarea)
+            setCopySuccess(true)
+            setTimeout(() => setCopySuccess(false), 2000)
+        }
+    }
+
     // 启动OAuth2授权会话
     const startAuthSession = async () => {
         try {
+            console.log('[OAuth2PopupAuth] startAuthSession开始 - 当前autoOpenWindow值:', autoOpenWindow, 'type:', typeof autoOpenWindow)
             setStatus('initializing')
             const authSession = await oauth2Service.startAuthSession(provider, configId)
             setSession(authSession)
             setTimeRemaining(Math.max(0, authSession.expiresAt - Math.floor(Date.now() / 1000)))
 
-            // 打开popup窗口
-            openPopup(authSession.authUrl)
+            // 根据配置决定是否自动打开popup窗口
+            console.log('[OAuth2PopupAuth] 授权会话已创建，检查是否自动打开窗口...')
+            console.log('[OAuth2PopupAuth] autoOpenWindow === true:', autoOpenWindow === true)
+            console.log('[OAuth2PopupAuth] autoOpenWindow:', autoOpenWindow)
+            
+            if (autoOpenWindow === true) {
+                console.log('[OAuth2PopupAuth] ✅ 配置为自动打开，正在打开授权窗口')
+                openPopup(authSession.authUrl)
+            } else {
+                console.log('[OAuth2PopupAuth] ❌ 配置为不自动打开，等待用户手动操作')
+                console.log('[OAuth2PopupAuth] 原因: autoOpenWindow =', autoOpenWindow)
+            }
 
             // 开始轮询状态
             startPolling(authSession.state)
@@ -294,10 +360,11 @@ export default function OAuth2PopupAuth({ provider, configId, onSuccess, onCance
         }
     }
 
-    // 组件挂载时启动授权
+    // 组件挂载时启动授权 - 等待配置加载完成
     useEffect(() => {
-        // 防止重复启动授权会话
-        if (!authStartedRef.current) {
+        // 只有在配置加载完成且未启动授权会话时才启动
+        if (autoOpenWindow !== null && !authStartedRef.current) {
+            console.log('[OAuth2PopupAuth] 配置已加载，启动授权会话，autoOpenWindow:', autoOpenWindow)
             authStartedRef.current = true
             startAuthSession()
         }
@@ -307,7 +374,7 @@ export default function OAuth2PopupAuth({ provider, configId, onSuccess, onCance
             stopPolling()
             closePopup()
         }
-    }, [])
+    }, [autoOpenWindow]) // 依赖于autoOpenWindow状态
 
     const statusDisplay = getStatusDisplay()
     const providerName = oauth2Service.getProviderDisplayName(provider)
@@ -347,6 +414,7 @@ export default function OAuth2PopupAuth({ provider, configId, onSuccess, onCance
                             <X className="w-5 h-5" />
                         </motion.button>
                     </div>
+
 
                     {/* 状态显示 */}
                     <motion.div
@@ -399,25 +467,70 @@ export default function OAuth2PopupAuth({ provider, configId, onSuccess, onCance
 
                     {/* 操作按钮 */}
                     <motion.div
-                        className="flex space-x-3"
+                        className="space-y-3"
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.5 }}
                     >
                         <AnimatePresence mode="wait">
                             {status === 'waiting' && session && (
-                                <motion.button
-                                    onClick={() => openPopup(session.authUrl)}
-                                    className="flex-1 flex items-center justify-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                                    initial={{ opacity: 0, x: -20 }}
-                                    animate={{ opacity: 1, x: 0 }}
-                                    exit={{ opacity: 0, x: -20 }}
-                                    whileHover={{ scale: 1.02 }}
-                                    whileTap={{ scale: 0.98 }}
-                                >
-                                    <ExternalLink className="w-4 h-4" />
-                                    <span>重新打开授权窗口</span>
-                                </motion.button>
+                                <>
+                                    {/* 主要操作按钮行 */}
+                                    <div className="flex space-x-3">
+                                        <motion.button
+                                            onClick={() => openPopup(session.authUrl)}
+                                            className="flex-1 flex items-center justify-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                                            initial={{ opacity: 0, x: -20 }}
+                                            animate={{ opacity: 1, x: 0 }}
+                                            exit={{ opacity: 0, x: -20 }}
+                                            whileHover={{ scale: 1.02 }}
+                                            whileTap={{ scale: 0.98 }}
+                                        >
+                                            <ExternalLink className="w-4 h-4" />
+                                            <span>打开授权窗口</span>
+                                        </motion.button>
+
+                                        <motion.button
+                                            onClick={copyAuthUrl}
+                                            className={`flex items-center justify-center space-x-2 px-4 py-2 rounded-md transition-colors ${copySuccess
+                                                ? 'bg-green-600 text-white'
+                                                : 'bg-gray-600 text-white hover:bg-gray-700'
+                                                }`}
+                                            initial={{ opacity: 0, x: 20 }}
+                                            animate={{ opacity: 1, x: 0 }}
+                                            exit={{ opacity: 0, x: 20 }}
+                                            whileHover={{ scale: 1.02 }}
+                                            whileTap={{ scale: 0.98 }}
+                                            title="复制授权链接"
+                                        >
+                                            {copySuccess ? (
+                                                <CheckCircle className="w-4 h-4" />
+                                            ) : (
+                                                <Copy className="w-4 h-4" />
+                                            )}
+                                        </motion.button>
+                                    </div>
+
+                                    {/* 复制链接说明 */}
+                                    <motion.div
+                                        className="text-xs text-gray-500 dark:text-gray-400 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md p-2"
+                                        initial={{ opacity: 0, y: 10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ delay: 0.1 }}
+                                    >
+                                        <div className="flex items-start space-x-2">
+                                            <AlertCircle className="w-4 h-4 text-yellow-600 dark:text-yellow-400 mt-0.5 flex-shrink-0" />
+                                            <div>
+                                                <p className="font-medium text-yellow-800 dark:text-yellow-200">重要提示:</p>
+                                                <p className="mt-1 text-yellow-700 dark:text-yellow-300">
+                                                    • 授权链接只能使用一次，完成授权后会自动失效<br />
+                                                    • 如需复制到其他浏览器，请先关闭自动打开窗口选项<br />
+                                                    • 复制链接时请确保在同一设备上的浏览器中打开
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </motion.div>
+                                </>
                             )}
 
                             {(status === 'failed' || status === 'expired') && (
@@ -436,17 +549,20 @@ export default function OAuth2PopupAuth({ provider, configId, onSuccess, onCance
                             )}
                         </AnimatePresence>
 
-                        <motion.button
-                            onClick={handleCancel}
-                            className="flex-1 px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 dark:bg-gray-600 dark:text-gray-200 dark:hover:bg-gray-500 transition-colors"
-                            initial={{ opacity: 0, x: 20 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ delay: 0.1 }}
-                            whileHover={{ scale: 1.02 }}
-                            whileTap={{ scale: 0.98 }}
-                        >
-                            取消
-                        </motion.button>
+                        {/* 取消按钮 */}
+                        <div className="flex space-x-3">
+                            <motion.button
+                                onClick={handleCancel}
+                                className="flex-1 px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 dark:bg-gray-600 dark:text-gray-200 dark:hover:bg-gray-500 transition-colors"
+                                initial={{ opacity: 0, x: 20 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ delay: 0.1 }}
+                                whileHover={{ scale: 1.02 }}
+                                whileTap={{ scale: 0.98 }}
+                            >
+                                取消
+                            </motion.button>
+                        </div>
                     </motion.div>
                 </motion.div>
             </motion.div>

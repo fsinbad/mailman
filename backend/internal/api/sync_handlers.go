@@ -1,10 +1,12 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"mailman/internal/models"
@@ -13,6 +15,7 @@ import (
 	"mailman/internal/utils"
 
 	"github.com/gorilla/mux"
+	"gorm.io/gorm"
 )
 
 // SyncHandlers handles sync configuration related requests
@@ -24,6 +27,11 @@ type SyncHandlers struct {
 	accountRepo    *repository.EmailAccountRepository
 	logger         *utils.Logger
 	activityLogger *services.ActivityLogger
+	db             *gorm.DB // Add database connection for transactions
+
+	// 账户级别的锁，防止同步配置并发冲突
+	accountLocks map[uint]*sync.Mutex
+	locksMutex   sync.RWMutex
 }
 
 // NewSyncHandlers creates a new sync handlers instance
@@ -33,6 +41,7 @@ func NewSyncHandlers(
 	mailboxRepo *repository.MailboxRepository,
 	fetcher *services.FetcherService,
 	accountRepo *repository.EmailAccountRepository,
+	db *gorm.DB, // Add database connection parameter
 ) *SyncHandlers {
 	return &SyncHandlers{
 		syncConfigRepo: syncConfigRepo,
@@ -42,7 +51,34 @@ func NewSyncHandlers(
 		accountRepo:    accountRepo,
 		logger:         utils.NewLogger("SyncHandlers"),
 		activityLogger: services.GetActivityLogger(),
+		db:             db,
+		accountLocks:   make(map[uint]*sync.Mutex),
+		locksMutex:     sync.RWMutex{},
 	}
+}
+
+// getAccountLock 获取指定账户的互斥锁，如果不存在则创建
+func (h *SyncHandlers) getAccountLock(accountID uint) *sync.Mutex {
+	h.locksMutex.RLock()
+	if lock, exists := h.accountLocks[accountID]; exists {
+		h.locksMutex.RUnlock()
+		return lock
+	}
+	h.locksMutex.RUnlock()
+
+	// 需要写锁来创建新锁
+	h.locksMutex.Lock()
+	defer h.locksMutex.Unlock()
+
+	// 双重检查，防止并发创建
+	if lock, exists := h.accountLocks[accountID]; exists {
+		return lock
+	}
+
+	// 创建新锁
+	lock := &sync.Mutex{}
+	h.accountLocks[accountID] = lock
+	return lock
 }
 
 // GetAccountMailboxes retrieves all mailboxes for an account
@@ -194,6 +230,17 @@ func (h *SyncHandlers) CreateAccountSyncConfig(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// 获取账户级别的锁，防止与同步进程冲突
+	accountLock := h.getAccountLock(uint(accountID))
+	accountLock.Lock()
+	defer accountLock.Unlock()
+
+	h.logger.Debug("Acquired lock for account %d", accountID)
+
+	// 关键修复：暂时停止该账户的AccountSyncer，避免长时间同步阻塞API
+	h.logger.Debug("Temporarily stopping AccountSyncer for account %d to prevent sync conflicts", accountID)
+	h.syncManager.UpdateSubscription(uint(accountID), nil) // 停止同步器
+
 	var req UpdateSyncConfigRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.logger.Error("Failed to decode request body: %v", err)
@@ -272,6 +319,13 @@ func (h *SyncHandlers) UpdateAccountSyncConfig(w http.ResponseWriter, r *http.Re
 		http.Error(w, "Invalid account ID", http.StatusBadRequest)
 		return
 	}
+
+	// 获取账户级别的锁，防止与同步进程冲突
+	accountLock := h.getAccountLock(uint(accountID))
+	accountLock.Lock()
+	defer accountLock.Unlock()
+
+	h.logger.Debug("Acquired lock for account %d", accountID)
 
 	var req UpdateSyncConfigRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -713,6 +767,238 @@ func (h *SyncHandlers) GetEffectiveSyncConfig(w http.ResponseWriter, r *http.Req
 	h.logger.Info("GetEffectiveSyncConfig completed in %v", time.Since(start))
 }
 
+// BatchCreateOrUpdateAccountSyncConfig handles batch sync configuration creation/update with performance optimizations
+func (h *SyncHandlers) BatchCreateOrUpdateAccountSyncConfig(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	h.logger.Debug("BatchCreateOrUpdateAccountSyncConfig called")
+	h.logger.LogHTTPRequest(r, true)
+
+	// Set request timeout context
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+
+	var req BatchSyncConfigRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.logger.Error("Failed to decode request body: %v", err)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	h.logger.Debug("Batch request: AccountIds=%v, EnableAutoSync=%v, SyncInterval=%v, SyncFolders=%v",
+		req.AccountIds, req.EnableAutoSync, req.SyncInterval, req.SyncFolders)
+
+	// Validate sync interval
+	if req.SyncInterval < 1 {
+		h.logger.Warn("Invalid sync interval: %d", req.SyncInterval)
+		http.Error(w, "Sync interval must be at least 1 second", http.StatusBadRequest)
+		return
+	}
+
+	// Validate account IDs
+	if len(req.AccountIds) == 0 {
+		h.logger.Warn("No account IDs provided")
+		http.Error(w, "At least one account ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Limit batch size to prevent timeout
+	const maxBatchSize = 50
+	if len(req.AccountIds) > maxBatchSize {
+		h.logger.Warn("Batch size %d exceeds maximum %d", len(req.AccountIds), maxBatchSize)
+		http.Error(w, fmt.Sprintf("Batch size cannot exceed %d accounts", maxBatchSize), http.StatusBadRequest)
+		return
+	}
+
+	h.logger.Info("Processing optimized batch sync config for %d accounts", len(req.AccountIds))
+
+	// Execute batch processing with transaction
+	response, err := h.processBatchSyncConfigOptimized(ctx, req)
+	if err != nil {
+		h.logger.Error("Batch processing failed: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	h.logger.Info("Optimized batch sync config completed: %d success, %d errors in %v",
+		response.SuccessCount, response.ErrorCount, time.Since(start))
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		h.logger.Error("Failed to encode response: %v", err)
+	}
+}
+
+// processBatchSyncConfigOptimized performs optimized batch processing with transaction
+func (h *SyncHandlers) processBatchSyncConfigOptimized(ctx context.Context, req BatchSyncConfigRequest) (*BatchSyncConfigResponse, error) {
+	// Begin transaction for data consistency
+	tx := h.db.Begin()
+	if tx.Error != nil {
+		return nil, fmt.Errorf("failed to begin transaction: %w", tx.Error)
+	}
+	defer tx.Rollback() // Will be no-op if Commit() succeeds
+
+	var response BatchSyncConfigResponse
+	var errors []BatchSyncError
+	var successfulConfigs []*models.EmailAccountSyncConfig
+
+	// Batch load all accounts to reduce database queries
+	h.logger.Debug("Batch loading accounts")
+	accountMap, err := h.batchLoadAccounts(tx, req.AccountIds)
+	if err != nil {
+		return nil, fmt.Errorf("failed to batch load accounts: %w", err)
+	}
+
+	// Batch load existing configs
+	h.logger.Debug("Batch loading existing sync configs")
+	existingConfigMap, err := h.batchLoadConfigs(tx, req.AccountIds)
+	if err != nil {
+		return nil, fmt.Errorf("failed to batch load configs: %w", err)
+	}
+
+	// Process each account with individual locks to prevent conflicts
+	for _, accountID := range req.AccountIds {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("batch processing timeout")
+		default:
+		}
+
+		// 获取账户级别的锁，防止与同步进程冲突
+		accountLock := h.getAccountLock(accountID)
+		accountLock.Lock()
+
+		// Check if account exists
+		account, exists := accountMap[accountID]
+		if !exists {
+			h.logger.Warn("Account %d not found", accountID)
+			errors = append(errors, BatchSyncError{
+				AccountID:    accountID,
+				EmailAddress: fmt.Sprintf("account_%d", accountID),
+				Error:        "Account not found",
+			})
+			accountLock.Unlock()
+			continue
+		}
+
+		// Create or update config
+		var config *models.EmailAccountSyncConfig
+		if existingConfig, hasConfig := existingConfigMap[accountID]; hasConfig {
+			// Update existing config
+			config = existingConfig
+			config.EnableAutoSync = req.EnableAutoSync
+			config.SyncInterval = req.SyncInterval
+			// Keep existing sync folders or use system default
+			if len(config.SyncFolders) == 0 {
+				config.SyncFolders = models.StringSlice{"INBOX"}
+			}
+		} else {
+			// Create new config
+			config = &models.EmailAccountSyncConfig{
+				AccountID:      accountID,
+				EnableAutoSync: req.EnableAutoSync,
+				SyncInterval:   req.SyncInterval,
+				SyncFolders:    models.StringSlice{"INBOX"}, // System default
+				SyncStatus:     "idle",
+			}
+		}
+
+		// Save config within transaction
+		if err := tx.Save(config).Error; err != nil {
+			h.logger.Error("Failed to save config for account %d: %v", accountID, err)
+			errors = append(errors, BatchSyncError{
+				AccountID:    accountID,
+				EmailAddress: account.EmailAddress,
+				Error:        "Failed to save config: " + err.Error(),
+			})
+			accountLock.Unlock()
+			continue
+		}
+
+		successfulConfigs = append(successfulConfigs, config)
+		response.SuccessCount++
+		h.logger.Debug("Successfully processed config for account %d (%s)", accountID, account.EmailAddress)
+
+		// 释放账户锁
+		accountLock.Unlock()
+	}
+
+	// Commit transaction
+	if err := tx.Commit().Error; err != nil {
+		return nil, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	h.logger.Info("Transaction committed successfully for %d configs", len(successfulConfigs))
+
+	// Update sync manager subscriptions after successful database commit
+	// This is done outside transaction to avoid blocking
+	go h.updateSyncManagerBatch(successfulConfigs)
+
+	response.ErrorCount = len(errors)
+	response.Errors = errors
+
+	return &response, nil
+}
+
+// batchLoadAccounts loads all accounts in a single query
+func (h *SyncHandlers) batchLoadAccounts(tx *gorm.DB, accountIDs []uint) (map[uint]*models.EmailAccount, error) {
+	var accounts []models.EmailAccount
+	if err := tx.Where("id IN ?", accountIDs).Find(&accounts).Error; err != nil {
+		return nil, err
+	}
+
+	accountMap := make(map[uint]*models.EmailAccount)
+	for i := range accounts {
+		accountMap[accounts[i].ID] = &accounts[i]
+	}
+
+	return accountMap, nil
+}
+
+// batchLoadConfigs loads all existing sync configs in a single query
+func (h *SyncHandlers) batchLoadConfigs(tx *gorm.DB, accountIDs []uint) (map[uint]*models.EmailAccountSyncConfig, error) {
+	var configs []models.EmailAccountSyncConfig
+	if err := tx.Where("account_id IN ?", accountIDs).Find(&configs).Error; err != nil {
+		return nil, err
+	}
+
+	configMap := make(map[uint]*models.EmailAccountSyncConfig)
+	for i := range configs {
+		configMap[configs[i].AccountID] = &configs[i]
+	}
+
+	return configMap, nil
+}
+
+// updateSyncManagerBatch updates sync manager subscriptions in background
+func (h *SyncHandlers) updateSyncManagerBatch(configs []*models.EmailAccountSyncConfig) {
+	h.logger.Debug("Starting background sync manager updates for %d configs", len(configs))
+
+	// Process in smaller batches to avoid overwhelming the sync manager
+	const batchSize = 10
+	for i := 0; i < len(configs); i += batchSize {
+		end := i + batchSize
+		if end > len(configs) {
+			end = len(configs)
+		}
+
+		batch := configs[i:end]
+		for _, config := range batch {
+			if err := h.syncManager.UpdateSubscription(config.AccountID, config); err != nil {
+				h.logger.Warn("Failed to update subscription for account %d: %v", config.AccountID, err)
+			} else {
+				h.logger.Debug("Updated sync manager subscription for account %d", config.AccountID)
+			}
+		}
+
+		// Small delay between batches to prevent overwhelming
+		if end < len(configs) {
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+
+	h.logger.Info("Completed background sync manager updates for %d configs", len(configs))
+}
+
 // Request/Response types
 
 type UpdateSyncConfigRequest struct {
@@ -759,4 +1045,23 @@ type GetAllSyncConfigsResponse struct {
 	TotalPages  int                             `json:"total_pages"`
 	HasNext     bool                            `json:"has_next"`
 	HasPrevious bool                            `json:"has_previous"`
+}
+
+type BatchSyncConfigRequest struct {
+	AccountIds     []uint   `json:"account_ids"`
+	EnableAutoSync bool     `json:"enable_auto_sync"`
+	SyncInterval   int      `json:"sync_interval"`
+	SyncFolders    []string `json:"sync_folders,omitempty"` // Optional, system will handle
+}
+
+type BatchSyncConfigResponse struct {
+	SuccessCount int              `json:"success_count"`
+	ErrorCount   int              `json:"error_count"`
+	Errors       []BatchSyncError `json:"errors"`
+}
+
+type BatchSyncError struct {
+	AccountID    uint   `json:"account_id"`
+	EmailAddress string `json:"email_address"`
+	Error        string `json:"error"`
 }

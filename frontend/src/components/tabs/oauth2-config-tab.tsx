@@ -37,14 +37,14 @@ function OAuth2ConfigCard({
         try {
             setLoadingAccounts(true)
             const accounts = await emailAccountService.getAccounts()
-            
+
             // 根据provider_type筛选相关账户
-            const relatedAccounts = accounts.filter(account => {
+            const relatedAccounts = (accounts || []).filter(account => {
                 // 检查账户是否使用OAuth2认证且provider类型匹配
-                return account.authType === 'oauth2' &&
-                       account.mailProvider?.type === config.provider_type
+                return account && account.authType === 'oauth2' &&
+                    account.mailProvider?.type === config.provider_type
             })
-            
+
             setAccountCount(relatedAccounts.length)
         } catch (error) {
             console.error('Failed to load account count:', error)
@@ -67,9 +67,23 @@ function OAuth2ConfigCard({
 
     // 组件加载时获取账户数量
     useEffect(() => {
-        loadAccountCount()
-    }, [config.id])
+        if (config?.id) {
+            loadAccountCount()
+        }
+    }, [config?.id])
 
+    // 添加安全检查，确保config对象完整
+    if (!config || !config.provider_type) {
+        console.warn('Invalid config object:', config)
+        return (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-6 dark:border-red-800 dark:bg-red-900/20">
+                <p className="text-red-600 dark:text-red-400">配置数据无效</p>
+            </div>
+        )
+    }
+
+    // 检查配置是否完整
+    const isConfigComplete = config.client_id && config.client_secret && config.redirect_uri
     const handleToggleEnabled = async () => {
         setIsToggling(true)
         try {
@@ -197,7 +211,7 @@ function OAuth2ConfigCard({
                         删除
                     </Button>
                 </div>
-                
+
                 {/* 账户数量显示 */}
                 <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
                     <button
@@ -224,6 +238,18 @@ function OAuth2ConfigCard({
                 </div>
             </div>
 
+            {/* 配置完整性状态提示 */}
+            {!isConfigComplete && (
+                <div className="mb-4 rounded-lg border border-yellow-200 bg-yellow-50 p-4 dark:border-yellow-800 dark:bg-yellow-900/20">
+                    <div className="flex items-center">
+                        <AlertCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 mr-2" />
+                        <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                            配置不完整，请点击编辑按钮完善配置信息
+                        </p>
+                    </div>
+                </div>
+            )}
+
             {/* 配置信息区域 */}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
@@ -231,11 +257,22 @@ function OAuth2ConfigCard({
                         客户端 ID
                     </label>
                     <div
-                        className="rounded-md bg-gray-50 px-3 py-2 text-sm dark:bg-gray-700 cursor-pointer group"
-                        title={config.client_id}
+                        className={cn(
+                            "rounded-md px-3 py-2 text-sm cursor-pointer group",
+                            config.client_id
+                                ? "bg-gray-50 dark:bg-gray-700"
+                                : "bg-red-50 border border-red-200 dark:bg-red-900/20 dark:border-red-800"
+                        )}
+                        title={config.client_id || "未配置"}
                     >
-                        <span className="block truncate group-hover:text-primary-600">
-                            {config.client_id.length > 30 ? `${config.client_id.substring(0, 30)}...` : config.client_id}
+                        <span className={cn(
+                            "block truncate group-hover:text-primary-600",
+                            !config.client_id && "text-red-600 dark:text-red-400 italic"
+                        )}>
+                            {config.client_id
+                                ? (config.client_id.length > 30 ? `${config.client_id.substring(0, 30)}...` : config.client_id)
+                                : "未配置"
+                            }
                         </span>
                     </div>
                 </div>
@@ -244,11 +281,22 @@ function OAuth2ConfigCard({
                         客户端密钥
                     </label>
                     <div
-                        className="rounded-md bg-gray-50 px-3 py-2 text-sm dark:bg-gray-700 cursor-pointer group"
-                        title={config.client_secret}
+                        className={cn(
+                            "rounded-md px-3 py-2 text-sm cursor-pointer group",
+                            config.client_secret
+                                ? "bg-gray-50 dark:bg-gray-700"
+                                : "bg-red-50 border border-red-200 dark:bg-red-900/20 dark:border-red-800"
+                        )}
+                        title={config.client_secret ? "已配置" : "未配置"}
                     >
-                        <span className="block truncate group-hover:text-primary-600">
-                            {config.client_secret.length > 30 ? `${config.client_secret.substring(0, 30)}...` : config.client_secret}
+                        <span className={cn(
+                            "block truncate group-hover:text-primary-600",
+                            !config.client_secret && "text-red-600 dark:text-red-400 italic"
+                        )}>
+                            {config.client_secret
+                                ? (config.client_secret.length > 10 ? `${"*".repeat(10)}...` : "*".repeat(config.client_secret.length))
+                                : "未配置"
+                            }
                         </span>
                     </div>
                 </div>
@@ -257,11 +305,19 @@ function OAuth2ConfigCard({
                         重定向 URI
                     </label>
                     <div
-                        className="rounded-md bg-gray-50 px-3 py-2 text-sm dark:bg-gray-700 cursor-pointer group"
-                        title={config.redirect_uri}
+                        className={cn(
+                            "rounded-md px-3 py-2 text-sm cursor-pointer group",
+                            config.redirect_uri
+                                ? "bg-gray-50 dark:bg-gray-700"
+                                : "bg-red-50 border border-red-200 dark:bg-red-900/20 dark:border-red-800"
+                        )}
+                        title={config.redirect_uri || "未配置"}
                     >
-                        <span className="block truncate group-hover:text-primary-600">
-                            {config.redirect_uri}
+                        <span className={cn(
+                            "block truncate group-hover:text-primary-600",
+                            !config.redirect_uri && "text-red-600 dark:text-red-400 italic"
+                        )}>
+                            {config.redirect_uri || "未配置"}
                         </span>
                     </div>
                 </div>
@@ -270,7 +326,7 @@ function OAuth2ConfigCard({
                         权限范围
                     </label>
                     <div className="flex flex-wrap gap-2">
-                        {config.scopes.map((scope, index) => (
+                        {(config.scopes || []).map((scope, index) => (
                             <Badge
                                 key={index}
                                 variant="secondary"
@@ -300,10 +356,19 @@ export default function OAuth2ConfigTab() {
     const loadConfigs = async () => {
         try {
             setLoading(true)
+            setError(null)
             const configsData = await oauth2Service.getGlobalConfigs()
-            setConfigs(configsData)
+            // 确保返回的数据是数组，并且每个config都有必需的属性
+            const safeConfigsData = Array.isArray(configsData)
+                ? configsData.map(config => ({
+                    ...config,
+                    scopes: Array.isArray(config.scopes) ? config.scopes : []
+                }))
+                : []
+            setConfigs(safeConfigsData)
         } catch (err) {
             setError('加载OAuth2配置失败')
+            setConfigs([]) // 确保在错误时configs为空数组而不是null
             console.error('Failed to load OAuth2 configs:', err)
         } finally {
             setLoading(false)
@@ -337,7 +402,7 @@ export default function OAuth2ConfigTab() {
 
     // 处理启用/禁用切换
     const handleToggleEnabled = (config: OAuth2GlobalConfig) => {
-        setConfigs(configs.map(c =>
+        setConfigs((configs || []).map(c =>
             c.id === config.id ? { ...c, is_enabled: !c.is_enabled } : c
         ))
     }
@@ -361,15 +426,38 @@ export default function OAuth2ConfigTab() {
 
     // 获取未配置的提供商
     const getUnconfiguredProviders = () => {
-        const configuredProviders = configs.map(c => c.provider_type)
-        return oauth2Service.getSupportedProviders().filter(p => !configuredProviders.includes(p))
+        try {
+            if (!configs || !Array.isArray(configs)) {
+                return oauth2Service.getSupportedProviders() || []
+            }
+            const configuredProviders = configs.map(c => c?.provider_type).filter(Boolean)
+            const supportedProviders = oauth2Service.getSupportedProviders()
+            if (!supportedProviders || !Array.isArray(supportedProviders)) {
+                return []
+            }
+            return supportedProviders.filter(p => !configuredProviders.includes(p))
+        } catch (error) {
+            console.error('Error in getUnconfiguredProviders:', error)
+            return []
+        }
     }
 
-    // 过滤配置
-    const filteredConfigs = configs.filter(config =>
-        oauth2Service.getProviderDisplayName(config.provider_type).toLowerCase().includes(searchQuery.toLowerCase()) ||
-        config.client_id.toLowerCase().includes(searchQuery.toLowerCase())
-    )
+    // 过滤配置 - 显示所有有效的配置，包括未完成的配置
+    const filteredConfigs = (configs || []).filter(config => {
+        try {
+            if (!config || !config.provider_type) {
+                return false
+            }
+            const displayName = oauth2Service.getProviderDisplayName(config.provider_type).toLowerCase()
+            const clientId = (config.client_id || '').toLowerCase()
+            const searchLower = searchQuery.toLowerCase()
+
+            return displayName.includes(searchLower) || clientId.includes(searchLower)
+        } catch (error) {
+            console.error('Error filtering config:', error, config)
+            return false
+        }
+    })
 
     if (loading) {
         return (
@@ -483,13 +571,13 @@ export default function OAuth2ConfigTab() {
                 )}
 
                 {/* 可用提供商提示 */}
-                {getUnconfiguredProviders().length > 0 && (
+                {getUnconfiguredProviders()?.length > 0 && (
                     <div className="rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-800">
                         <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">
                             可添加的提供商
                         </h3>
                         <div className="flex flex-wrap gap-2">
-                            {getUnconfiguredProviders().map((provider) => (
+                            {getUnconfiguredProviders()?.map((provider) => (
                                 <Badge
                                     key={provider}
                                     variant="outline"

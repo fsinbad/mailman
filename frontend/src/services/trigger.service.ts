@@ -94,6 +94,12 @@ export class TriggerService {
         const response = await apiClient.get<ApiResponse<PaginatedTriggerLogsResponse>>(url)
         return response.data
     }
+    
+    // 获取单个触发器执行日志
+    async getTriggerLog(logId: number): Promise<TriggerExecutionLog> {
+        const response = await apiClient.get<ApiResponse<TriggerExecutionLog>>(`${this.baseUrl}/logs/${logId}`)
+        return response.data
+    }
 
     // 获取触发器统计信息
     async getTriggerStatistics(

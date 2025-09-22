@@ -368,3 +368,162 @@ func (r *SyncConfigRepository) GetEffectiveSyncConfig(accountID uint) (*models.E
 		SyncStatus:     "idle",
 	}, nil
 }
+
+// GetRecentlyModifiedConfigs 获取最近修改的同步配置（用于配置监控）
+func (r *SyncConfigRepository) GetRecentlyModifiedConfigs(since time.Time) ([]models.EmailAccountSyncConfig, error) {
+	var configs []models.EmailAccountSyncConfig
+
+	err := r.db.Where("updated_at > ? AND enable_auto_sync = ?", since, true).
+		Preload("Account").
+		Select("id, account_id, enable_auto_sync, sync_interval, sync_folders, updated_at, last_sync_time, last_sync_end_time").
+		Find(&configs).Error
+
+	return configs, err
+}
+
+// GetAllConfigsWithAccounts 获取所有配置及其账户信息（用于配置监控初始化）
+func (r *SyncConfigRepository) GetAllConfigsWithAccounts() ([]models.EmailAccountSyncConfig, error) {
+	var configs []models.EmailAccountSyncConfig
+
+	err := r.db.Preload("Account").
+		Where("enable_auto_sync = ?", true).
+		Find(&configs).Error
+
+	return configs, err
+}
+
+// GetConfigChecksumMap 获取配置校验和映射（用于快速变更检测）
+func (r *SyncConfigRepository) GetConfigChecksumMap() (map[uint]string, error) {
+	type ConfigChecksum struct {
+		AccountID uint   `json:"account_id"`
+		Checksum  string `json:"checksum"`
+	}
+
+	var checksums []ConfigChecksum
+
+	// 计算配置的MD5校验和
+	query := `
+		SELECT 
+			account_id,
+			MD5(CONCAT(
+				COALESCE(enable_auto_sync::text, ''),
+				COALESCE(sync_interval::text, ''),
+				COALESCE(sync_folders::text, ''),
+				COALESCE(updated_at::text, '')
+			)) as checksum
+		FROM email_account_sync_config 
+		WHERE enable_auto_sync = true
+	`
+
+	err := r.db.Raw(query).Scan(&checksums).Error
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[uint]string)
+	for _, cs := range checksums {
+		result[cs.AccountID] = cs.Checksum
+	}
+
+	return result, nil
+}
+
+// BatchGetConfigsByIDs 批量获取指定ID的配置（优化性能）
+func (r *SyncConfigRepository) BatchGetConfigsByIDs(accountIDs []uint) ([]models.EmailAccountSyncConfig, error) {
+	var configs []models.EmailAccountSyncConfig
+
+	err := r.db.Where("account_id IN ? AND enable_auto_sync = ?", accountIDs, true).
+		Preload("Account").
+		Find(&configs).Error
+
+	return configs, err
+}
+
+// BatchCreateOrUpdateConfigs 批量创建或更新配置（优化性能）
+func (r *SyncConfigRepository) BatchCreateOrUpdateConfigs(configs []*models.EmailAccountSyncConfig) error {
+	if len(configs) == 0 {
+		return nil
+	}
+
+	// Use transaction for batch operations
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		for _, config := range configs {
+			if err := r.createOrUpdateSingle(tx, config); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// createOrUpdateSingle handles single config creation/update within transaction
+func (r *SyncConfigRepository) createOrUpdateSingle(tx *gorm.DB, config *models.EmailAccountSyncConfig) error {
+	var existing models.EmailAccountSyncConfig
+	err := tx.Where("account_id = ?", config.AccountID).First(&existing).Error
+
+	if err == gorm.ErrRecordNotFound {
+		// Create new record
+		return tx.Create(config).Error
+	}
+
+	// Update existing record
+	config.ID = existing.ID
+	return tx.Save(config).Error
+}
+
+// BatchUpdateSyncIntervals 批量更新同步间隔
+func (r *SyncConfigRepository) BatchUpdateSyncIntervals(updates map[uint]int) error {
+	if len(updates) == 0 {
+		return nil
+	}
+
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		for accountID, interval := range updates {
+			if err := tx.Model(&models.EmailAccountSyncConfig{}).
+				Where("account_id = ?", accountID).
+				Update("sync_interval", interval).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// BatchGetAccountsByIDs 批量获取账户信息
+func (r *SyncConfigRepository) BatchGetAccountsByIDs(accountIDs []uint) (map[uint]*models.EmailAccount, error) {
+	var accounts []models.EmailAccount
+	err := r.db.Where("id IN ?", accountIDs).Find(&accounts).Error
+	if err != nil {
+		return nil, err
+	}
+
+	accountMap := make(map[uint]*models.EmailAccount)
+	for i := range accounts {
+		accountMap[accounts[i].ID] = &accounts[i]
+	}
+	return accountMap, nil
+}
+
+// BatchGetConfigsByAccountIDs 批量获取配置信息
+func (r *SyncConfigRepository) BatchGetConfigsByAccountIDs(accountIDs []uint) (map[uint]*models.EmailAccountSyncConfig, error) {
+	var configs []models.EmailAccountSyncConfig
+	err := r.db.Where("account_id IN ?", accountIDs).Find(&configs).Error
+	if err != nil {
+		return nil, err
+	}
+
+	configMap := make(map[uint]*models.EmailAccountSyncConfig)
+	for i := range configs {
+		configMap[configs[i].AccountID] = &configs[i]
+	}
+	return configMap, nil
+}
+
+// GetAutoDisabledConfigs 获取被自动禁用的同步配置
+func (r *SyncConfigRepository) GetAutoDisabledConfigs(since time.Time) ([]models.EmailAccountSyncConfig, error) {
+	var configs []models.EmailAccountSyncConfig
+	err := r.db.Preload("Account").
+		Where("auto_disabled = ? AND last_error_time > ?", true, since).
+		Find(&configs).Error
+	return configs, err
+}

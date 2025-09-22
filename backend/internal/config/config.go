@@ -11,6 +11,7 @@ type Config struct {
 	Server   ServerConfig
 	Database DatabaseConfig
 	OpenAI   OpenAIConfig
+	OAuth2   OAuth2Config
 }
 
 // ServerConfig holds server-related configuration
@@ -39,6 +40,19 @@ type OpenAIConfig struct {
 	Temperature float64
 }
 
+// OAuth2Config holds OAuth2-related configuration
+type OAuth2Config struct {
+	Gmail   OAuth2ProviderConfig
+	Outlook OAuth2ProviderConfig
+}
+
+// OAuth2ProviderConfig holds OAuth2 provider configuration
+type OAuth2ProviderConfig struct {
+	ClientID     string
+	ClientSecret string
+	RedirectURI  string
+}
+
 // Load loads configuration from environment variables
 func Load() *Config {
 	return &Config{
@@ -61,6 +75,18 @@ func Load() *Config {
 			Model:       getEnv("OPENAI_MODEL", "gpt-3.5-turbo"),
 			MaxTokens:   getEnvAsInt("OPENAI_MAX_TOKENS", 1000),
 			Temperature: getEnvAsFloat("OPENAI_TEMPERATURE", 0.7),
+		},
+		OAuth2: OAuth2Config{
+			Gmail: OAuth2ProviderConfig{
+				ClientID:     getEnv("GMAIL_CLIENT_ID", ""),
+				ClientSecret: getEnv("GMAIL_CLIENT_SECRET", ""),
+				RedirectURI:  getEnv("GMAIL_REDIRECT_URI", "http://localhost:8080/api/oauth2/callback/gmail"),
+			},
+			Outlook: OAuth2ProviderConfig{
+				ClientID:     getEnv("OUTLOOK_CLIENT_ID", ""),
+				ClientSecret: getEnv("OUTLOOK_CLIENT_SECRET", ""),
+				RedirectURI:  getEnv("OUTLOOK_REDIRECT_URI", "http://localhost:8080/api/oauth2/callback/outlook"),
+			},
 		},
 	}
 }

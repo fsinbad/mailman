@@ -1,0 +1,92 @@
+groups:
+- name: email_trigger_alerts
+  rules:
+  - alert: HighCpuUsage
+    expr: (100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)) > 80
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High CPU usage (instance {{ $labels.instance }})"
+      description: "CPU usage is above 80% for 5 minutes\n  VALUE = {{ $value }}%"
+
+  - alert: HighMemoryUsage
+    expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 85
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High memory usage (instance {{ $labels.instance }})"
+      description: "Memory usage is above 85% for 5 minutes\n  VALUE = {{ $value }}%"
+
+  - alert: EmailProcessingDelay
+    expr: mailman_email_processing_time_seconds > 30
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Email processing delay (instance {{ $labels.instance }})"
+      description: "Email processing time is above 30 seconds\n  VALUE = {{ $value }}s"
+
+  - alert: EmailQueueSize
+    expr: mailman_email_queue_size > 1000
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Large email queue (instance {{ $labels.instance }})"
+      description: "Email queue size is above 1000 for 5 minutes\n  VALUE = {{ $value }}"
+
+  - alert: TriggerFailureRate
+    expr: rate(mailman_trigger_executions_total{status="failed"}[5m]) / rate(mailman_trigger_executions_total[5m]) * 100 > 10
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High trigger failure rate (instance {{ $labels.instance }})"
+      description: "Trigger failure rate is above 10% for 5 minutes\n  VALUE = {{ $value }}%"
+
+  - alert: CriticalTriggerFailure
+    expr: mailman_trigger_executions_total{status="failed", critical="true"} > 0
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Critical trigger failure (instance {{ $labels.instance }})"
+      description: "A critical trigger has failed\n  TRIGGER = {{ $labels.trigger_name }}"
+
+  - alert: SlowDatabaseQueries
+    expr: mailman_database_query_time_seconds > 1
+    for: 2m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Slow database queries (instance {{ $labels.instance }})"
+      description: "Database query time is above 1 second\n  VALUE = {{ $value }}s"
+
+  - alert: HighDatabaseConnections
+    expr: mailman_database_connections / mailman_database_max_connections * 100 > 80
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High database connections (instance {{ $labels.instance }})"
+      description: "Database connections are above 80% of maximum\n  VALUE = {{ $value }}%"
+
+  - alert: SlowApiResponse
+    expr: mailman_api_response_time_seconds{quantile="0.95"} > 2
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Slow API response (instance {{ $labels.instance }})"
+      description: "95th percentile of API response time is above 2 seconds\n  VALUE = {{ $value }}s"
+
+  - alert: HighApiErrorRate
+    expr: rate(mailman_api_requests_total{status=~"5.."}[5m]) / rate(mailman_api_requests_total[5m]) * 100 > 5
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High API error rate (instance {{ $labels.instance }})"
+      description: "API error rate is above 5% for 5 minutes\n  VALUE = {{ $value }}%"

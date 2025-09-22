@@ -1,7 +1,6 @@
 package services
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -16,19 +15,7 @@ import (
 	"github.com/robertkrimen/otto"
 )
 
-// TriggerWorker 触发器工作器
-type TriggerWorker struct {
-	ID            uint
-	TriggerID     uint
-	Trigger       *models.EmailTrigger
-	Context       context.Context
-	CancelFunc    context.CancelFunc
-	LastCheckTime time.Time
-	IsRunning     bool
-	mu            sync.RWMutex
-}
-
-// TriggerService 触发器服务
+// TriggerService 触发器服务 - 事件驱动模式
 type TriggerService struct {
 	triggerRepo         *repository.TriggerRepository
 	logRepo             *repository.TriggerExecutionLogRepository
@@ -36,11 +23,10 @@ type TriggerService struct {
 	extractorService    *ExtractorService
 	subscriptionManager *SubscriptionManager
 
-	// Worker管理
-	workers    map[uint]*TriggerWorker // key: triggerID
-	workersMu  sync.RWMutex
-	shutdownCh chan struct{}
-	wg         sync.WaitGroup
+	// 事件订阅管理
+	eventSubscriptions map[uint]func() // key: triggerID, value: unsubscribe function
+	mu                 sync.RWMutex
+	shutdownCh         chan struct{}
 }
 
 // NewTriggerService 创建触发器服务
@@ -56,14 +42,14 @@ func NewTriggerService(
 		emailRepo:           emailRepo,
 		extractorService:    NewExtractorService(),
 		subscriptionManager: subscriptionManager,
-		workers:             make(map[uint]*TriggerWorker),
+		eventSubscriptions:  make(map[uint]func()),
 		shutdownCh:          make(chan struct{}),
 	}
 }
 
-// Start 启动触发器服务
+// Start 启动触发器服务 - 事件驱动模式
 func (s *TriggerService) Start() error {
-	log.Printf("[TriggerService] Starting trigger service...")
+	log.Printf("[TriggerService] Starting trigger service (event-driven mode)...")
 
 	// 加载所有启用的触发器
 	triggers, err := s.triggerRepo.GetByStatus(models.TriggerStatusEnabled)
@@ -71,14 +57,14 @@ func (s *TriggerService) Start() error {
 		return fmt.Errorf("failed to load enabled triggers: %w", err)
 	}
 
-	// 为每个启用的触发器创建worker
+	// 为每个启用的触发器订阅邮件事件
 	for _, trigger := range triggers {
-		if err := s.startWorker(&trigger); err != nil {
-			log.Printf("[TriggerService] Failed to start worker for trigger %d: %v", trigger.ID, err)
+		if err := s.subscribeToEmailEvents(&trigger); err != nil {
+			log.Printf("[TriggerService] Failed to subscribe to email events for trigger %d: %v", trigger.ID, err)
 		}
 	}
 
-	log.Printf("[TriggerService] Started %d trigger workers", len(s.workers))
+	log.Printf("[TriggerService] Started %d trigger event subscriptions", len(s.eventSubscriptions))
 	return nil
 }
 
@@ -88,15 +74,14 @@ func (s *TriggerService) Stop() {
 
 	close(s.shutdownCh)
 
-	// 停止所有workers
-	s.workersMu.Lock()
-	for _, worker := range s.workers {
-		worker.CancelFunc()
+	// 取消所有事件订阅
+	s.mu.Lock()
+	for triggerID, unsubscribe := range s.eventSubscriptions {
+		unsubscribe()
+		log.Printf("[TriggerService] Unsubscribed trigger %d from email events", triggerID)
 	}
-	s.workersMu.Unlock()
-
-	// 等待所有workers退出
-	s.wg.Wait()
+	s.eventSubscriptions = make(map[uint]func())
+	s.mu.Unlock()
 
 	log.Printf("[TriggerService] Trigger service stopped")
 }
@@ -107,10 +92,10 @@ func (s *TriggerService) CreateTrigger(trigger *models.EmailTrigger) error {
 		return err
 	}
 
-	// 如果触发器是启用状态，立即启动worker
+	// 如果触发器是启用状态，立即订阅邮件事件
 	if trigger.Status == models.TriggerStatusEnabled {
-		if err := s.startWorker(trigger); err != nil {
-			log.Printf("[TriggerService] Failed to start worker for new trigger %d: %v", trigger.ID, err)
+		if err := s.subscribeToEmailEvents(trigger); err != nil {
+			log.Printf("[TriggerService] Failed to subscribe to email events for new trigger %d: %v", trigger.ID, err)
 		}
 	}
 
@@ -119,47 +104,34 @@ func (s *TriggerService) CreateTrigger(trigger *models.EmailTrigger) error {
 
 // UpdateTrigger 更新触发器
 func (s *TriggerService) UpdateTrigger(trigger *models.EmailTrigger) error {
-	// 获取旧的触发器信息
-	oldTrigger, err := s.triggerRepo.GetByID(trigger.ID)
-	if err != nil {
-		return err
-	}
-
 	// 更新数据库
 	if err := s.triggerRepo.Update(trigger); err != nil {
 		return err
 	}
 
-	// 处理worker状态变化
-	s.workersMu.Lock()
-	worker, exists := s.workers[trigger.ID]
-	s.workersMu.Unlock()
+	// 处理事件订阅状态变化
+	s.mu.Lock()
+	_, exists := s.eventSubscriptions[trigger.ID]
+	s.mu.Unlock()
 
 	if trigger.Status == models.TriggerStatusEnabled {
 		if exists {
-			// 如果worker已存在，检查是否需要重启（检查间隔变化）
-			if oldTrigger.CheckInterval != trigger.CheckInterval {
-				log.Printf("[TriggerService] Restarting worker for trigger %d due to interval change", trigger.ID)
-				s.stopWorker(trigger.ID)
-				if err := s.startWorker(trigger); err != nil {
-					log.Printf("[TriggerService] Failed to restart worker for trigger %d: %v", trigger.ID, err)
-				}
-			} else {
-				// 更新worker中的触发器配置
-				worker.mu.Lock()
-				worker.Trigger = trigger
-				worker.mu.Unlock()
+			// 如果订阅已存在，先取消再重新订阅（处理配置变化）
+			log.Printf("[TriggerService] Updating event subscription for trigger %d", trigger.ID)
+			s.unsubscribeFromEmailEvents(trigger.ID)
+			if err := s.subscribeToEmailEvents(trigger); err != nil {
+				log.Printf("[TriggerService] Failed to update event subscription for trigger %d: %v", trigger.ID, err)
 			}
 		} else {
-			// 启动新的worker
-			if err := s.startWorker(trigger); err != nil {
-				log.Printf("[TriggerService] Failed to start worker for updated trigger %d: %v", trigger.ID, err)
+			// 启动新的事件订阅
+			if err := s.subscribeToEmailEvents(trigger); err != nil {
+				log.Printf("[TriggerService] Failed to subscribe to email events for updated trigger %d: %v", trigger.ID, err)
 			}
 		}
 	} else {
-		// 触发器被禁用，停止worker
+		// 触发器被禁用，取消事件订阅
 		if exists {
-			s.stopWorker(trigger.ID)
+			s.unsubscribeFromEmailEvents(trigger.ID)
 		}
 	}
 
@@ -168,8 +140,8 @@ func (s *TriggerService) UpdateTrigger(trigger *models.EmailTrigger) error {
 
 // DeleteTrigger 删除触发器
 func (s *TriggerService) DeleteTrigger(id uint) error {
-	// 停止worker
-	s.stopWorker(id)
+	// 取消事件订阅
+	s.unsubscribeFromEmailEvents(id)
 
 	// 删除触发器
 	return s.triggerRepo.Delete(id)
@@ -187,7 +159,7 @@ func (s *TriggerService) EnableTrigger(id uint) error {
 	}
 
 	trigger.Status = models.TriggerStatusEnabled
-	return s.startWorker(trigger)
+	return s.subscribeToEmailEvents(trigger)
 }
 
 // DisableTrigger 禁用触发器
@@ -196,101 +168,76 @@ func (s *TriggerService) DisableTrigger(id uint) error {
 		return err
 	}
 
-	s.stopWorker(id)
+	s.unsubscribeFromEmailEvents(id)
 	return nil
 }
 
-// startWorker 启动触发器worker
-func (s *TriggerService) startWorker(trigger *models.EmailTrigger) error {
-	s.workersMu.Lock()
-	defer s.workersMu.Unlock()
+// subscribeToEmailEvents 订阅邮件事件
+func (s *TriggerService) subscribeToEmailEvents(trigger *models.EmailTrigger) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	// 检查worker是否已存在
-	if _, exists := s.workers[trigger.ID]; exists {
-		return fmt.Errorf("worker for trigger %d already exists", trigger.ID)
+	// 检查是否已存在订阅
+	if _, exists := s.eventSubscriptions[trigger.ID]; exists {
+		return fmt.Errorf("event subscription for trigger %d already exists", trigger.ID)
 	}
 
-	// 创建worker上下文
-	ctx, cancel := context.WithCancel(context.Background())
-
-	worker := &TriggerWorker{
-		ID:            uint(len(s.workers) + 1),
-		TriggerID:     trigger.ID,
-		Trigger:       trigger,
-		Context:       ctx,
-		CancelFunc:    cancel,
-		LastCheckTime: time.Now(),
-		IsRunning:     false,
-	}
-
-	s.workers[trigger.ID] = worker
-
-	// 启动worker goroutine
-	s.wg.Add(1)
-	go s.runWorker(worker)
-
-	log.Printf("[TriggerService] Started worker for trigger %d (%s) with interval %ds",
-		trigger.ID, trigger.Name, trigger.CheckInterval)
-
-	return nil
-}
-
-// stopWorker 停止触发器worker
-func (s *TriggerService) stopWorker(triggerID uint) {
-	s.workersMu.Lock()
-	worker, exists := s.workers[triggerID]
-	if exists {
-		delete(s.workers, triggerID)
-	}
-	s.workersMu.Unlock()
-
-	if exists {
-		worker.CancelFunc()
-		log.Printf("[TriggerService] Stopped worker for trigger %d", triggerID)
-	}
-}
-
-// runWorker 运行触发器worker
-func (s *TriggerService) runWorker(worker *TriggerWorker) {
-	defer s.wg.Done()
-
-	worker.mu.Lock()
-	interval := time.Duration(worker.Trigger.CheckInterval) * time.Second
-	worker.mu.Unlock()
-
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	log.Printf("[TriggerService] Worker %d for trigger %d started with interval %v",
-		worker.ID, worker.TriggerID, interval)
-
-	for {
-		select {
-		case <-worker.Context.Done():
-			log.Printf("[TriggerService] Worker %d for trigger %d stopped", worker.ID, worker.TriggerID)
-			return
-
-		case <-s.shutdownCh:
-			log.Printf("[TriggerService] Worker %d for trigger %d stopped due to service shutdown", worker.ID, worker.TriggerID)
-			return
-
-		case <-ticker.C:
-			worker.mu.Lock()
-			worker.IsRunning = true
-			trigger := worker.Trigger
-			lastCheckTime := worker.LastCheckTime
-			worker.mu.Unlock()
-
-			// 执行触发器检查
-			if err := s.executeTrigger(trigger, lastCheckTime); err != nil {
-				log.Printf("[TriggerService] Error executing trigger %d: %v", trigger.ID, err)
+	// 创建邮件事件处理器
+	eventHandler := func(email models.Email) error {
+		// 异步处理邮件事件，避免阻塞事件流
+		go func() {
+			if err := s.processEmailWithTrigger(trigger, email, time.Now()); err != nil {
+				log.Printf("[TriggerService] Error processing email %d with trigger %d: %v", email.ID, trigger.ID, err)
 			}
+		}()
+		return nil
+	}
 
-			worker.mu.Lock()
-			worker.LastCheckTime = time.Now()
-			worker.IsRunning = false
-			worker.mu.Unlock()
-		}
+	// 创建订阅请求
+	subscribeRequest := SubscribeRequest{
+		Type:     SubscriptionTypeRealtime,
+		Priority: PriorityNormal,
+		Filter: EmailFilter{
+			EmailAddress:  trigger.EmailAddress,
+			StartDate:     trigger.StartDate,
+			EndDate:       trigger.EndDate,
+			Subject:       trigger.Subject,
+			From:          trigger.From,
+			To:            trigger.To,
+			HasAttachment: trigger.HasAttachment,
+			Unread:        trigger.Unread,
+			Labels:        trigger.Labels,
+			Folders:       trigger.Folders,
+			CustomFilters: trigger.CustomFilters,
+		},
+		Callback: eventHandler,
+		Timeout:  30 * time.Second,
+	}
+
+	// 使用SubscriptionManager订阅邮件事件
+	subscription, err := s.subscriptionManager.Subscribe(subscribeRequest)
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to email events: %w", err)
+	}
+
+	// 保存取消订阅的函数
+	s.eventSubscriptions[trigger.ID] = func() {
+		s.subscriptionManager.Unsubscribe(subscription.ID)
+	}
+
+	log.Printf("[TriggerService] Subscribed to email events for trigger %d (%s)", trigger.ID, trigger.Name)
+	return nil
+}
+
+// unsubscribeFromEmailEvents 取消邮件事件订阅
+func (s *TriggerService) unsubscribeFromEmailEvents(triggerID uint) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if unsubscribe, exists := s.eventSubscriptions[triggerID]; exists {
+		unsubscribe()
+		delete(s.eventSubscriptions, triggerID)
+		log.Printf("[TriggerService] Unsubscribed from email events for trigger %d", triggerID)
 	}
 }
 
@@ -408,8 +355,26 @@ func (s *TriggerService) processEmailWithTrigger(trigger *models.EmailTrigger, e
 			Success:    false,
 		}
 
+		// 将新的 TriggerAction 转换为旧的 TriggerActionConfig 格式
+		actionConfig := models.TriggerActionConfig{
+			Type:        action.Type,
+			Name:        action.Name,
+			Description: "",
+			Config:      "",
+			Enabled:     action.Enabled,
+			Order:       action.Order,
+		}
+
+		// 如果 Config 是 map，尝试转换为 JSON 字符串
+		if action.Config != "" {
+			configBytes, err := json.Marshal(action.Config)
+			if err == nil {
+				actionConfig.Config = string(configBytes)
+			}
+		}
+
 		// 执行动作
-		outputEmail, err := s.executeAction(action, modifiedEmail)
+		outputEmail, err := s.executeAction(actionConfig, modifiedEmail)
 		actionEndTime := time.Now()
 		result.ExecutionMs = actionEndTime.Sub(actionStartTime).Milliseconds()
 
@@ -658,23 +623,29 @@ func (s *TriggerService) updateTriggerStatistics(trigger *models.EmailTrigger, s
 	}
 }
 
-// GetWorkerStatus 获取worker状态
-func (s *TriggerService) GetWorkerStatus() map[uint]map[string]interface{} {
-	s.workersMu.RLock()
-	defer s.workersMu.RUnlock()
+// GetEventSubscriptionStatus 获取事件订阅状态
+func (s *TriggerService) GetEventSubscriptionStatus() map[uint]map[string]interface{} {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	status := make(map[uint]map[string]interface{})
-	for triggerID, worker := range s.workers {
-		worker.mu.RLock()
-		status[triggerID] = map[string]interface{}{
-			"worker_id":       worker.ID,
-			"trigger_id":      worker.TriggerID,
-			"trigger_name":    worker.Trigger.Name,
-			"is_running":      worker.IsRunning,
-			"last_check_time": worker.LastCheckTime,
-			"check_interval":  worker.Trigger.CheckInterval,
+	for triggerID := range s.eventSubscriptions {
+		// 获取触发器详情
+		trigger, err := s.triggerRepo.GetByID(triggerID)
+		if err != nil {
+			log.Printf("[TriggerService] Failed to get trigger %d details: %v", triggerID, err)
+			continue
 		}
-		worker.mu.RUnlock()
+
+		status[triggerID] = map[string]interface{}{
+			"trigger_id":    triggerID,
+			"trigger_name":  trigger.Name,
+			"subscribed":    true,
+			"status":        trigger.Status,
+			"email_address": trigger.EmailAddress,
+			"created_at":    trigger.CreatedAt,
+			"updated_at":    trigger.UpdatedAt,
+		}
 	}
 
 	return status

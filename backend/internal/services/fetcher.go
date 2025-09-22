@@ -27,6 +27,7 @@ import (
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/gmail/v1"
 	"google.golang.org/api/option"
+	"gorm.io/gorm"
 )
 
 // FetcherService is responsible for fetching emails from an IMAP server.
@@ -53,12 +54,12 @@ type FetchEmailsOptions struct {
 }
 
 // NewFetcherService creates a new FetcherService.
-func NewFetcherService(accountRepo *repository.EmailAccountRepository, emailRepo *repository.EmailRepository) *FetcherService {
+func NewFetcherService(accountRepo *repository.EmailAccountRepository, emailRepo *repository.EmailRepository, db *gorm.DB) *FetcherService {
 	return &FetcherService{
 		accountRepo:   accountRepo,
 		emailRepo:     emailRepo,
 		parserService: NewParserService(),
-		oauth2Service: NewOAuth2Service(),
+		oauth2Service: NewOAuth2Service(db),
 		logger:        utils.NewLogger("FetcherService"),
 	}
 }
@@ -93,7 +94,7 @@ func (s *FetcherService) FetchEmailsWithOptions(account models.EmailAccount, opt
 
 // FetchEmailsFromMultipleMailboxes fetches emails from multiple mailboxes based on user selection
 func (s *FetcherService) FetchEmailsFromMultipleMailboxes(account models.EmailAccount, options FetchEmailsOptions) ([]models.Email, error) {
-	s.logger.Info("Starting to fetch emails from multiple mailboxes for %s", account.EmailAddress)
+	s.logger.Debug("Starting to fetch emails from multiple mailboxes for %s", account.EmailAddress)
 	if options.StartDate != nil {
 		s.logger.Debug("Filter StartDate: %s", options.StartDate.Format(time.RFC3339))
 	}
@@ -105,7 +106,7 @@ func (s *FetcherService) FetchEmailsFromMultipleMailboxes(account models.EmailAc
 
 	if isGmailAccount {
 		// Gmail账户：使用统一的Gmail API同步方法
-		s.logger.Info("Detected Gmail account, using unified Gmail API sync")
+		s.logger.Debug("Detected Gmail account, using unified Gmail API sync")
 
 		// 为Gmail账户移除日期过滤器，让Gmail History API自己处理增量同步
 		gmailOptions := options
@@ -358,11 +359,39 @@ func (s *FetcherService) fetchEmailsFromServer(account models.EmailAccount, opti
 	case models.AuthTypeOAuth2:
 		// OAuth2 authentication
 		s.logger.Debug("Using OAuth2 authentication")
-		// Get client_id and refresh_token from CustomSettings
+		// Get client_id from CustomSettings, with fallback to global config
 		clientID, ok := account.CustomSettings["client_id"]
 		if !ok {
-			s.logger.Error("client_id not found in custom settings")
-			return nil, fmt.Errorf("client_id not found in custom settings")
+			s.logger.Warn("client_id not found in custom settings, trying to get from global config")
+
+			// Try to get client_id from global OAuth2 config
+			oauth2GlobalConfigRepo := repository.NewOAuth2GlobalConfigRepository(s.accountRepo.GetDB())
+			var config *models.OAuth2GlobalConfig
+			var err error
+
+			// First try by OAuth2ProviderID if available
+			if account.OAuth2ProviderID != nil {
+				config, err = oauth2GlobalConfigRepo.GetByID(*account.OAuth2ProviderID)
+				if err != nil {
+					s.logger.Warn("Failed to get config by OAuth2ProviderID %d: %v", *account.OAuth2ProviderID, err)
+				}
+			}
+
+			// Fallback to provider type
+			if config == nil {
+				config, err = oauth2GlobalConfigRepo.GetByProviderType(account.MailProvider.Type)
+				if err != nil {
+					s.logger.Error("Failed to get global config for provider %s: %v", account.MailProvider.Type, err)
+					return nil, fmt.Errorf("client_id not found in custom settings and failed to get from global config: %w", err)
+				}
+			}
+
+			if config == nil {
+				return nil, fmt.Errorf("client_id not found in custom settings and no global config available for provider %s", account.MailProvider.Type)
+			}
+
+			clientID = config.ClientID
+			s.logger.Info("Using client_id from global config (ID: %d, Name: %s) for fetchEmailsFromServer", config.ID, config.Name)
 		}
 
 		refreshToken, ok := account.CustomSettings["refresh_token"]
@@ -402,19 +431,31 @@ func (s *FetcherService) fetchEmailsFromServer(account models.EmailAccount, opti
 			}
 		}
 
-		// Refresh access token - use provider-specific method
-		s.logger.Debug("Refreshing OAuth2 access token for provider: %s", account.MailProvider.Type)
-		accessToken, err := s.oauth2Service.RefreshAccessTokenForProvider(string(account.MailProvider.Type), clientID, clientSecret, refreshToken)
+		// Refresh access token - use cached method with retry protection and proxy support
+		s.logger.Debug("Refreshing OAuth2 access token with cache for provider: %s", account.MailProvider.Type)
+		accessToken, err := s.oauth2Service.RefreshAccessTokenWithCacheAndProxy(
+			string(account.MailProvider.Type),
+			clientID,
+			clientSecret,
+			refreshToken,
+			account.ID,
+			account.Proxy, // Pass proxy settings if available
+		)
 		if err != nil {
 			s.logger.Error("Failed to refresh access token: %v", err)
 			return nil, fmt.Errorf("failed to refresh access token: %w", err)
 		}
 
-		// Update access token in account
-		if account.CustomSettings == nil {
-			account.CustomSettings = make(models.JSONMap)
+		// Update access token in account - 创建新的副本以避免并发写入问题
+		newCustomSettings := make(models.JSONMap)
+		if account.CustomSettings != nil {
+			// 复制现有设置
+			for k, v := range account.CustomSettings {
+				newCustomSettings[k] = v
+			}
 		}
-		account.CustomSettings["access_token"] = accessToken
+		newCustomSettings["access_token"] = accessToken
+		account.CustomSettings = newCustomSettings
 
 		// Update the account with new access token
 		updatedAccount := account
@@ -435,15 +476,31 @@ func (s *FetcherService) fetchEmailsFromServer(account models.EmailAccount, opti
 
 	s.logger.Info("Successfully connected and logged in for %s using %s auth", account.EmailAddress, account.AuthType)
 
+	// Check connection state after authentication
+	if c.State() != imap.AuthenticatedState && c.State() != imap.SelectedState {
+		s.logger.Error("IMAP connection is in unexpected state after authentication: %s", c.State())
+		return nil, fmt.Errorf("IMAP connection is in unexpected state after authentication: %s", c.State())
+	}
+
+	s.logger.Debug("IMAP connection state after authentication: %s", c.State())
+
 	// Select mailbox (default to INBOX if not specified)
 	mailboxName := options.Mailbox
 	if mailboxName == "" {
 		mailboxName = "INBOX"
 	}
 
+	s.logger.Debug("Attempting to select mailbox: %s", mailboxName)
 	mbox, err := c.Select(mailboxName, false)
 	if err != nil {
-		s.logger.Error("Failed to select mailbox %s: %v", mailboxName, err)
+		s.logger.Error("Failed to select mailbox %s: %v (connection state: %s)", mailboxName, err, c.State())
+
+		// Try to check if connection is still alive
+		if c.State() == imap.LogoutState || c.State() == imap.NotAuthenticatedState {
+			s.logger.Error("Connection appears to be disconnected, state: %s", c.State())
+			return nil, fmt.Errorf("connection lost after authentication, failed to select mailbox %s: %w", mailboxName, err)
+		}
+
 		return nil, fmt.Errorf("failed to select mailbox %s: %w", mailboxName, err)
 	}
 
@@ -814,9 +871,16 @@ func (s *FetcherService) GetMailboxes(account models.EmailAccount) ([]models.Mai
 			}
 		}
 
-		// Refresh access token - use provider-specific method
-		s.logger.Debug("Refreshing OAuth2 access token for provider: %s", account.MailProvider.Type)
-		accessToken, err := s.oauth2Service.RefreshAccessTokenForProvider(string(account.MailProvider.Type), clientID, clientSecret, refreshToken)
+		// Refresh access token - use cached method with concurrency protection for better reliability
+		s.logger.Debug("Refreshing OAuth2 access token for IMAP connection with cache")
+		accessToken, err := s.oauth2Service.RefreshAccessTokenWithCacheAndProxy(
+			string(account.MailProvider.Type),
+			clientID,
+			clientSecret,
+			refreshToken,
+			account.ID,
+			account.Proxy, // Pass proxy settings if available
+		)
 		if err != nil {
 			s.logger.Error("Failed to refresh access token: %v", err)
 			return nil, fmt.Errorf("failed to refresh access token: %w", err)
@@ -826,7 +890,15 @@ func (s *FetcherService) GetMailboxes(account models.EmailAccount) ([]models.Mai
 		if account.CustomSettings == nil {
 			account.CustomSettings = make(models.JSONMap)
 		}
-		account.CustomSettings["access_token"] = accessToken
+		// 并发安全的CustomSettings更新
+		newCustomSettings := make(models.JSONMap)
+		if account.CustomSettings != nil {
+			for k, v := range account.CustomSettings {
+				newCustomSettings[k] = v
+			}
+		}
+		newCustomSettings["access_token"] = accessToken
+		account.CustomSettings = newCustomSettings
 
 		// Update the account with new access token
 		updatedAccount := account
@@ -905,6 +977,49 @@ func (s *FetcherService) createHTTPProxyDialer(proxyURL *url.URL) proxy.Dialer {
 type httpProxyDialer struct {
 	proxyURL *url.URL
 	logger   *utils.Logger
+}
+
+// createHTTPClientWithProxy creates an HTTP client with proxy support
+func (s *FetcherService) createHTTPClientWithProxy(proxyStr string) (*http.Client, error) {
+	if proxyStr == "" {
+		return &http.Client{Timeout: 30 * time.Second}, nil
+	}
+
+	proxyURL, err := url.Parse(proxyStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid proxy URL: %w", err)
+	}
+
+	s.logger.Debug("Creating HTTP client with proxy: %s", proxyStr)
+
+	// Create transport with proxy
+	transport := &http.Transport{
+		Proxy: http.ProxyURL(proxyURL),
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+
+	// Handle SOCKS5 proxy
+	if proxyURL.Scheme == "socks5" || proxyURL.Scheme == "socks5h" {
+		dialer, err := proxy.FromURL(proxyURL, proxy.Direct)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create SOCKS5 proxy dialer: %w", err)
+		}
+		transport.Dial = dialer.Dial
+		transport.Proxy = nil // Don't use HTTP proxy for SOCKS5
+	}
+
+	return &http.Client{
+		Transport: transport,
+		Timeout:   30 * time.Second,
+	}, nil
 }
 
 // Dial implements the proxy.Dialer interface
@@ -1189,18 +1304,46 @@ func (s *FetcherService) VerifyConnection(account models.EmailAccount) error {
 		// OAuth2 authentication
 		s.logger.Debug("Using OAuth2 authentication")
 		s.logger.Debug("CustomSettings content: %+v", account.CustomSettings)
-		// Get client_id and refresh_token from CustomSettings
+		// Get client_id from CustomSettings, with fallback to global config
 		clientID, ok := account.CustomSettings["client_id"]
 		if !ok {
-			s.logger.Error("client_id not found in custom settings")
-			s.logger.Error("Available keys in CustomSettings: %v", func() []string {
+			s.logger.Warn("client_id not found in custom settings, trying to get from global config")
+			s.logger.Debug("Available keys in CustomSettings: %v", func() []string {
 				keys := make([]string, 0, len(account.CustomSettings))
 				for k := range account.CustomSettings {
 					keys = append(keys, k)
 				}
 				return keys
 			}())
-			return fmt.Errorf("client_id not found in custom settings")
+
+			// Try to get client_id from global OAuth2 config
+			oauth2GlobalConfigRepo := repository.NewOAuth2GlobalConfigRepository(s.accountRepo.GetDB())
+			var config *models.OAuth2GlobalConfig
+			var err error
+
+			// First try by OAuth2ProviderID if available
+			if account.OAuth2ProviderID != nil {
+				config, err = oauth2GlobalConfigRepo.GetByID(*account.OAuth2ProviderID)
+				if err != nil {
+					s.logger.Warn("Failed to get config by OAuth2ProviderID %d: %v", *account.OAuth2ProviderID, err)
+				}
+			}
+
+			// Fallback to provider type
+			if config == nil {
+				config, err = oauth2GlobalConfigRepo.GetByProviderType(account.MailProvider.Type)
+				if err != nil {
+					s.logger.Error("Failed to get global config for provider %s: %v", account.MailProvider.Type, err)
+					return fmt.Errorf("client_id not found in custom settings and failed to get from global config: %w", err)
+				}
+			}
+
+			if config == nil {
+				return fmt.Errorf("client_id not found in custom settings and no global config available for provider %s", account.MailProvider.Type)
+			}
+
+			clientID = config.ClientID
+			s.logger.Info("Using client_id from global config (ID: %d, Name: %s) for account %s", config.ID, config.Name, account.EmailAddress)
 		}
 
 		refreshToken, ok := account.CustomSettings["refresh_token"]
@@ -1239,9 +1382,16 @@ func (s *FetcherService) VerifyConnection(account models.EmailAccount) error {
 			s.logger.Debug("Retrieved client_secret from global config (ID: %d, Name: %s)", config.ID, config.Name)
 		}
 
-		// Refresh access token - use provider-specific method
-		s.logger.Debug("Refreshing OAuth2 access token for provider: %s", account.MailProvider.Type)
-		accessToken, err := s.oauth2Service.RefreshAccessTokenForProvider(string(account.MailProvider.Type), clientID, clientSecret, refreshToken)
+		// Refresh access token - use cached method with concurrency protection for better reliability
+		s.logger.Debug("Refreshing OAuth2 access token for IMAP connection with cache")
+		accessToken, err := s.oauth2Service.RefreshAccessTokenWithCacheAndProxy(
+			string(account.MailProvider.Type),
+			clientID,
+			clientSecret,
+			refreshToken,
+			account.ID,
+			account.Proxy, // Pass proxy settings if available
+		)
 		if err != nil {
 			s.logger.Error("Failed to refresh access token: %v", err)
 			return fmt.Errorf("failed to refresh access token: %w", err)
@@ -1326,13 +1476,15 @@ func (s *FetcherService) verifyGmailOAuth2Connection(account models.EmailAccount
 		return fmt.Errorf("refresh_token not found")
 	}
 
-	// Try to refresh token first to ensure it's valid
+	// Try to refresh token first to ensure it's valid - use cached method for better reliability
 	s.logger.Debug("Refreshing OAuth2 access token for Gmail verification")
-	newAccessToken, err := s.oauth2Service.RefreshAccessTokenForProvider(
+	newAccessToken, err := s.oauth2Service.RefreshAccessTokenWithCacheAndProxy(
 		"gmail",
 		oauth2Config.ClientID,
 		oauth2Config.ClientSecret,
 		refreshToken,
+		account.ID,
+		account.Proxy, // Pass proxy settings if available
 	)
 	if err != nil {
 		s.logger.Error("Failed to refresh token: %v", err)
@@ -1557,12 +1709,41 @@ func (s *FetcherService) connectAndAuthenticateIMAP(account models.EmailAccount)
 	case models.AuthTypeOAuth2:
 		// OAuth2 authentication
 		s.logger.Debug("Using OAuth2 authentication")
-		// Get client_id and refresh_token from CustomSettings
+		// Get client_id from CustomSettings, with fallback to global config
 		clientID, ok := account.CustomSettings["client_id"]
 		if !ok {
-			s.logger.Error("client_id not found in custom settings")
-			c.Logout()
-			return nil, fmt.Errorf("client_id not found in custom settings")
+			s.logger.Warn("client_id not found in custom settings, trying to get from global config")
+
+			// Try to get client_id from global OAuth2 config
+			oauth2GlobalConfigRepo := repository.NewOAuth2GlobalConfigRepository(s.accountRepo.GetDB())
+			var tempConfig *models.OAuth2GlobalConfig
+			var err error
+
+			// First try by OAuth2ProviderID if available
+			if account.OAuth2ProviderID != nil {
+				tempConfig, err = oauth2GlobalConfigRepo.GetByID(*account.OAuth2ProviderID)
+				if err != nil {
+					s.logger.Warn("Failed to get config by OAuth2ProviderID %d: %v", *account.OAuth2ProviderID, err)
+				}
+			}
+
+			// Fallback to provider type
+			if tempConfig == nil {
+				tempConfig, err = oauth2GlobalConfigRepo.GetByProviderType(account.MailProvider.Type)
+				if err != nil {
+					s.logger.Error("Failed to get global config for provider %s: %v", account.MailProvider.Type, err)
+					c.Logout()
+					return nil, fmt.Errorf("client_id not found in custom settings and failed to get from global config: %w", err)
+				}
+			}
+
+			if tempConfig == nil {
+				c.Logout()
+				return nil, fmt.Errorf("client_id not found in custom settings and no global config available for provider %s", account.MailProvider.Type)
+			}
+
+			clientID = tempConfig.ClientID
+			s.logger.Info("Using client_id from global config (ID: %d, Name: %s) for connectAndAuthenticateIMAP", tempConfig.ID, tempConfig.Name)
 		}
 
 		refreshToken, ok := account.CustomSettings["refresh_token"]
@@ -1603,9 +1784,16 @@ func (s *FetcherService) connectAndAuthenticateIMAP(account models.EmailAccount)
 			}
 		}
 
-		// Refresh access token - use provider-specific method
-		s.logger.Debug("Refreshing OAuth2 access token for provider: %s", account.MailProvider.Type)
-		accessToken, err := s.oauth2Service.RefreshAccessTokenForProvider(string(account.MailProvider.Type), clientID, clientSecret, refreshToken)
+		// Refresh access token - use cached method with concurrency protection for better reliability
+		s.logger.Debug("Refreshing OAuth2 access token for IMAP folder listing with cache")
+		accessToken, err := s.oauth2Service.RefreshAccessTokenWithCacheAndProxy(
+			string(account.MailProvider.Type),
+			clientID,
+			clientSecret,
+			refreshToken,
+			account.ID,
+			account.Proxy, // Pass proxy settings if available
+		)
 		if err != nil {
 			s.logger.Error("Failed to refresh access token: %v", err)
 			c.Logout()
@@ -1616,7 +1804,15 @@ func (s *FetcherService) connectAndAuthenticateIMAP(account models.EmailAccount)
 		if account.CustomSettings == nil {
 			account.CustomSettings = make(models.JSONMap)
 		}
-		account.CustomSettings["access_token"] = accessToken
+		// 并发安全的CustomSettings更新
+		newCustomSettings := make(models.JSONMap)
+		if account.CustomSettings != nil {
+			for k, v := range account.CustomSettings {
+				newCustomSettings[k] = v
+			}
+		}
+		newCustomSettings["access_token"] = accessToken
+		account.CustomSettings = newCustomSettings
 
 		// Update the account with new access token
 		updatedAccount := account
@@ -1630,6 +1826,25 @@ func (s *FetcherService) connectAndAuthenticateIMAP(account models.EmailAccount)
 			s.logger.Error("OAuth2 authentication failed: %v", err)
 			c.Logout()
 			return nil, fmt.Errorf("OAuth2 authentication failed: %w", err)
+		}
+
+		// Check connection state after authentication
+		if c.State() != imap.AuthenticatedState && c.State() != imap.SelectedState {
+			s.logger.Error("IMAP connection is in unexpected state after OAuth2 authentication: %s", c.State())
+			c.Logout()
+			return nil, fmt.Errorf("IMAP connection is in unexpected state after OAuth2 authentication: %s", c.State())
+		}
+
+		s.logger.Debug("IMAP connection state after OAuth2 authentication: %s", c.State())
+
+		// For Microsoft Outlook, sometimes we need to send a NOOP command to refresh the connection
+		if account.MailProvider.Type == models.ProviderTypeOutlook {
+			s.logger.Debug("Sending NOOP command to refresh Outlook connection state")
+			if err := c.Noop(); err != nil {
+				s.logger.Warn("NOOP command failed, but continuing: %v", err)
+			} else {
+				s.logger.Debug("NOOP command successful, connection state: %s", c.State())
+			}
 		}
 	default:
 		s.logger.Error("Unsupported auth type: %s", account.AuthType)
@@ -1650,7 +1865,7 @@ func (s *FetcherService) shouldUseGmailAPI(account models.EmailAccount) bool {
 
 // fetchEmailsFromGmailAPI fetches emails using Gmail API
 func (s *FetcherService) fetchEmailsFromGmailAPI(account models.EmailAccount, options FetchEmailsOptions) ([]models.Email, error) {
-	s.logger.Info("Fetching emails using Gmail API for account %s", account.EmailAddress)
+	s.logger.Debug("Fetching emails using Gmail API for account %s", account.EmailAddress)
 
 	// Create Gmail API service
 	gmailService, err := s.createGmailService(account)
@@ -1687,7 +1902,6 @@ func (s *FetcherService) fetchEmailsFromGmailAPI(account models.EmailAccount, op
 		} else {
 			emails = historyEmails
 			newHistoryID = historyID
-			s.logger.Info("Gmail unified incremental sync completed, found %d changed emails", len(emails))
 		}
 	} else {
 		s.logger.Debug("No previous History ID found, performing Gmail unified full sync")
@@ -1724,7 +1938,7 @@ func (s *FetcherService) fetchEmailsFromGmailAPI(account models.EmailAccount, op
 		s.logger.Warn("Failed to update last sync time: %v", err)
 	}
 
-	s.logger.Info("Successfully fetched %d emails from Gmail API for %s", len(emails), account.EmailAddress)
+	s.logger.Debug("email: %s, historyId: %s, newEmails: %d", account.EmailAddress, newHistoryID, len(emails))
 	return emails, nil
 }
 
@@ -1787,22 +2001,30 @@ func (s *FetcherService) createGmailService(account models.EmailAccount) (*gmail
 	if tokenExpiry.IsZero() || time.Now().After(tokenExpiry.Add(-5*time.Minute)) {
 		s.logger.Debug("Access token is expired or about to expire, refreshing token for Gmail API")
 
-		// 使用带缓存和并发控制的token刷新方法
-		newAccessToken, err := s.oauth2Service.RefreshAccessTokenWithCache(
+		// 使用带缓存和并发控制的token刷新方法，并传递代理配置
+		newAccessToken, err := s.oauth2Service.RefreshAccessTokenWithCacheAndProxy(
 			string(models.ProviderTypeGmail),
 			oauth2Config.ClientID,
 			oauth2Config.ClientSecret,
 			refreshToken,
 			account.ID,
+			account.Proxy, // 传递代理配置
 		)
 		if err != nil {
 			s.logger.Error("Failed to refresh access token for Gmail API: %v", err)
 			return nil, fmt.Errorf("failed to refresh access token: %w", err)
 		}
 
-		// Update access token in account
-		account.CustomSettings["access_token"] = newAccessToken
-		account.CustomSettings["expires_at"] = fmt.Sprintf("%d", time.Now().Add(time.Hour).Unix())
+		// Update access token in account - 并发安全更新
+		newCustomSettings := make(models.JSONMap)
+		if account.CustomSettings != nil {
+			for k, v := range account.CustomSettings {
+				newCustomSettings[k] = v
+			}
+		}
+		newCustomSettings["access_token"] = newAccessToken
+		newCustomSettings["expires_at"] = fmt.Sprintf("%d", time.Now().Add(time.Hour).Unix())
+		account.CustomSettings = newCustomSettings
 
 		// Update the account with new access token
 		if err := s.accountRepo.Update(&account); err != nil {
@@ -1832,12 +2054,36 @@ func (s *FetcherService) createGmailService(account models.EmailAccount) (*gmail
 		TokenType:    "Bearer",
 	}
 
-	// Create HTTP client with OAuth2
+	// Create HTTP client with OAuth2 and proxy support
 	ctx := context.Background()
-	client := config.Client(ctx, token)
+
+	// Create base HTTP client with proxy support if configured
+	var baseClient *http.Client
+	if account.Proxy != "" {
+		s.logger.Debug("Creating HTTP client with proxy for Gmail API: %s", account.Proxy)
+		baseClient, err = s.createHTTPClientWithProxy(account.Proxy)
+		if err != nil {
+			s.logger.Error("Failed to create HTTP client with proxy: %v", err)
+			return nil, fmt.Errorf("failed to create HTTP client with proxy: %w", err)
+		}
+	} else {
+		s.logger.Debug("Creating HTTP client without proxy for Gmail API")
+		baseClient = &http.Client{
+			Timeout: 30 * time.Second,
+		}
+	}
+
+	// Create OAuth2 client using the base client
+	oauth2Client := &http.Client{
+		Transport: &oauth2.Transport{
+			Source: config.TokenSource(ctx, token),
+			Base:   baseClient.Transport,
+		},
+		Timeout: baseClient.Timeout,
+	}
 
 	// Create Gmail service
-	service, err := gmail.NewService(ctx, option.WithHTTPClient(client))
+	service, err := gmail.NewService(ctx, option.WithHTTPClient(oauth2Client))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Gmail service: %w", err)
 	}
@@ -1967,10 +2213,47 @@ func (s *FetcherService) convertGmailMessage(gmailMsg *gmail.Message, accountID 
 		case "Bcc":
 			email.Bcc = models.StringSlice{header.Value}
 		case "Date":
-			if parsedDate, err := time.Parse(time.RFC1123Z, header.Value); err == nil {
-				email.Date = parsedDate
-			} else if parsedDate, err := time.Parse(time.RFC1123, header.Value); err == nil {
-				email.Date = parsedDate
+			// Try multiple date formats to handle Gmail's various date formats
+			dateFormats := []string{
+				time.RFC1123Z,                          // "Mon, 02 Jan 2006 15:04:05 -0700"
+				time.RFC1123,                           // "Mon, 02 Jan 2006 15:04:05 MST"
+				"Mon, 2 Jan 2006 15:04:05 -0700",       // Gmail format without leading zero
+				"Mon, 2 Jan 2006 15:04:05 MST",         // Gmail format without leading zero (MST)
+				"Mon, 2 Jan 2006 15:04:05 +0000",       // Gmail format with +0000 timezone
+				"Mon, 02 Jan 2006 15:04:05 +0000",      // Gmail format with leading zero and +0000
+				"Mon, 2 Jan 2006 15:04:05 GMT",         // Gmail format with GMT
+				"Mon, 02 Jan 2006 15:04:05 GMT",        // Gmail format with leading zero and GMT
+				"2 Jan 2006 15:04:05 -0700",            // Without weekday
+				"2 Jan 2006 15:04:05 +0000",            // Without weekday, +0000 timezone
+				"02 Jan 2006 15:04:05 +0000",           // With leading zero, no weekday, +0000
+				"2006-01-02 15:04:05 -0700",            // ISO-like format
+				"2006-01-02 15:04:05 +0000",            // ISO-like format with +0000
+				time.RFC3339,                           // "2006-01-02T15:04:05Z07:00"
+				time.RFC822Z,                           // "02 Jan 06 15:04 -0700"
+				time.RFC822,                            // "02 Jan 06 15:04 MST"
+				"Mon, 2 Jan 2006 15:04:05 -0700 (MST)", // With timezone name in parentheses
+				"Mon, 2 Jan 2006 15:04:05 +0000 (UTC)", // With UTC in parentheses
+			}
+
+			var parsedSuccessfully bool
+			for i, format := range dateFormats {
+				if parsedDate, err := time.Parse(format, header.Value); err == nil {
+					email.Date = parsedDate
+					email.ReceivedAt = parsedDate // Also set ReceivedAt
+					parsedSuccessfully = true
+					s.logger.Debug("Successfully parsed date '%s' using format %d (%s) for message %s",
+						header.Value, i, format, gmailMsg.Id)
+					break
+				}
+			}
+
+			// Enhanced logging if date parsing fails
+			if !parsedSuccessfully {
+				s.logger.Error("Failed to parse date '%s' for message %s. Tried %d formats. Setting to zero time.",
+					header.Value, gmailMsg.Id, len(dateFormats))
+				// Set to zero time explicitly
+				email.Date = time.Time{}
+				email.ReceivedAt = time.Time{}
 			}
 		}
 	}
@@ -2235,11 +2518,25 @@ func (s *FetcherService) getGmailMessageDate(msg *gmail.Message) time.Time {
 
 	for _, header := range msg.Payload.Headers {
 		if header.Name == "Date" {
-			if parsedDate, err := time.Parse(time.RFC1123Z, header.Value); err == nil {
-				return parsedDate
-			} else if parsedDate, err := time.Parse(time.RFC1123, header.Value); err == nil {
-				return parsedDate
+			// Try multiple date formats to handle Gmail's various date formats
+			dateFormats := []string{
+				time.RFC1123Z,                    // "Mon, 02 Jan 2006 15:04:05 -0700"
+				time.RFC1123,                     // "Mon, 02 Jan 2006 15:04:05 MST"
+				"Mon, 2 Jan 2006 15:04:05 -0700", // Gmail format without leading zero
+				"Mon, 2 Jan 2006 15:04:05 MST",   // Gmail format without leading zero (MST)
+				"2 Jan 2006 15:04:05 -0700",      // Without weekday
+				"2006-01-02 15:04:05 -0700",      // ISO-like format
+				time.RFC3339,                     // "2006-01-02T15:04:05Z07:00"
 			}
+
+			for _, format := range dateFormats {
+				if parsedDate, err := time.Parse(format, header.Value); err == nil {
+					return parsedDate
+				}
+			}
+
+			// Log if date parsing fails
+			s.logger.Warn("Failed to parse date '%s' for message %s", header.Value, msg.Id)
 		}
 	}
 	return time.Time{}
@@ -2319,8 +2616,8 @@ func (s *FetcherService) getGmailLabelID(service *gmail.Service, mailboxName str
 
 // fetchGmailHistoryChangesUnified fetches ALL email changes using Gmail History API without label filtering
 func (s *FetcherService) fetchGmailHistoryChangesUnified(service *gmail.Service, startHistoryID string, accountID uint, options FetchEmailsOptions) ([]models.Email, string, error) {
-	s.logger.Info("=== Gmail History API Debug ===")
-	s.logger.Info("Starting History ID: %s", startHistoryID)
+	s.logger.Debug("=== Gmail History API Debug ===")
+	s.logger.Debug("Starting History ID: %s", startHistoryID)
 
 	// Parse start history ID
 	historyID, err := strconv.ParseUint(startHistoryID, 10, 64)
@@ -2328,53 +2625,79 @@ func (s *FetcherService) fetchGmailHistoryChangesUnified(service *gmail.Service,
 		return nil, "", fmt.Errorf("invalid history ID: %w", err)
 	}
 
-	// Call History API WITHOUT any label filter to get ALL changes
-	// This is the key optimization - we get everything in one API call
-	historyCall := service.Users.History.List("me").StartHistoryId(historyID)
+	// Call History API WITH pagination handling to get ALL changes
+	s.logger.Debug("Calling Gmail History API with startHistoryId=%d", historyID)
 
-	s.logger.Info("Calling Gmail History API with startHistoryId=%d", historyID)
-	historyResp, err := historyCall.Do()
-	if err != nil {
-		s.logger.Error("Gmail History API call failed: %v", err)
-		return nil, "", fmt.Errorf("failed to get history: %w", err)
-	}
-
-	s.logger.Info("Gmail History API Response:")
-	s.logger.Info("  - Current History ID: %d", historyResp.HistoryId)
-	s.logger.Info("  - History entries count: %d", len(historyResp.History))
-	s.logger.Info("  - Next Page Token: %s", historyResp.NextPageToken)
-
-	if len(historyResp.History) == 0 {
-		s.logger.Info("No history changes found between %s and %d", startHistoryID, historyResp.HistoryId)
-		return []models.Email{}, fmt.Sprintf("%d", historyResp.HistoryId), nil
-	}
-
-	// Collect unique message IDs from ALL history changes
+	// Collect unique message IDs from ALL history changes across all pages
 	messageIDSet := make(map[string]bool)
-	for _, history := range historyResp.History {
-		// Messages added
-		for _, msgAdded := range history.MessagesAdded {
-			if msgAdded.Message != nil {
-				messageIDSet[msgAdded.Message.Id] = true
+	var finalHistoryID uint64
+	pageToken := ""
+	pageCount := 0
+
+	for {
+		historyCall := service.Users.History.List("me").StartHistoryId(historyID)
+		if pageToken != "" {
+			historyCall = historyCall.PageToken(pageToken)
+		}
+
+		historyResp, err := historyCall.Do()
+		if err != nil {
+			s.logger.Error("Gmail History API call failed on page %d: %v", pageCount+1, err)
+			return nil, "", fmt.Errorf("failed to get history: %w", err)
+		}
+
+		pageCount++
+		finalHistoryID = historyResp.HistoryId
+
+		s.logger.Debug("Gmail History API Response (page %d):", pageCount)
+		s.logger.Debug("  - Current History ID: %d", historyResp.HistoryId)
+		s.logger.Debug("  - History entries count: %d", len(historyResp.History))
+		s.logger.Debug("  - Next Page Token: %s", historyResp.NextPageToken)
+
+		// Process current page's history changes
+		for _, history := range historyResp.History {
+			// Messages added
+			for _, msgAdded := range history.MessagesAdded {
+				if msgAdded.Message != nil {
+					messageIDSet[msgAdded.Message.Id] = true
+				}
+			}
+			// Messages deleted
+			for _, msgDeleted := range history.MessagesDeleted {
+				if msgDeleted.Message != nil {
+					messageIDSet[msgDeleted.Message.Id] = true
+				}
+			}
+			// Label changes
+			for _, labelAdded := range history.LabelsAdded {
+				if labelAdded.Message != nil {
+					messageIDSet[labelAdded.Message.Id] = true
+				}
+			}
+			for _, labelRemoved := range history.LabelsRemoved {
+				if labelRemoved.Message != nil {
+					messageIDSet[labelRemoved.Message.Id] = true
+				}
 			}
 		}
-		// Messages deleted
-		for _, msgDeleted := range history.MessagesDeleted {
-			if msgDeleted.Message != nil {
-				messageIDSet[msgDeleted.Message.Id] = true
-			}
+
+		// Check if there are more pages
+		if historyResp.NextPageToken == "" {
+			break
 		}
-		// Label changes
-		for _, labelAdded := range history.LabelsAdded {
-			if labelAdded.Message != nil {
-				messageIDSet[labelAdded.Message.Id] = true
-			}
+		pageToken = historyResp.NextPageToken
+
+		// Safety check to prevent infinite loops
+		if pageCount >= 100 {
+			s.logger.Warn("Reached maximum page limit (100) for History API, stopping pagination")
+			break
 		}
-		for _, labelRemoved := range history.LabelsRemoved {
-			if labelRemoved.Message != nil {
-				messageIDSet[labelRemoved.Message.Id] = true
-			}
-		}
+	}
+
+	s.logger.Debug("Processed %d pages from Gmail History API", pageCount)
+
+	if len(messageIDSet) == 0 {
+		return []models.Email{}, fmt.Sprintf("%d", finalHistoryID), nil
 	}
 
 	s.logger.Debug("Found %d unique message IDs in unified history changes", len(messageIDSet))
@@ -2392,55 +2715,105 @@ func (s *FetcherService) fetchGmailHistoryChangesUnified(service *gmail.Service,
 
 	// For incremental sync via History API, we don't need date filtering
 	// History API already provides incremental changes since last sync
-	s.logger.Info("Gmail unified incremental sync: found %d changed messages", len(messages))
+	s.logger.Debug("Gmail unified incremental sync: found %d changed messages", len(messages))
 
 	// Convert to Email models directly - Gmail labels are stored in LabelIds
 	emails := s.convertGmailMessages(messages, accountID)
 
-	return emails, fmt.Sprintf("%d", historyResp.HistoryId), nil
+	return emails, fmt.Sprintf("%d", finalHistoryID), nil
 }
 
-// fetchGmailMessagesUnified fetches Gmail messages for full sync without label filtering
+// fetchGmailMessagesUnified fetches Gmail messages for full sync without label filtering with pagination
 func (s *FetcherService) fetchGmailMessagesUnified(service *gmail.Service, options FetchEmailsOptions) ([]*gmail.Message, error) {
-	s.logger.Debug("Fetching Gmail messages (unified full sync)")
+	s.logger.Debug("Fetching Gmail messages (unified full sync with pagination)")
 
 	// Build query based on options (date, search) but NOT mailbox/labels
 	query := s.buildGmailQueryUnified(options)
 
-	// List messages without label restrictions
-	listCall := service.Users.Messages.List("me").Q(query)
-
-	// Set a reasonable limit for full sync
-	limit := int64(options.Limit)
-	if limit <= 0 || limit > 500 {
-		limit = 100 // Default for unified sync
-	}
-	listCall = listCall.MaxResults(limit)
-
-	s.logger.Debug("Fetching Gmail messages (unified) with query: %s, limit: %d", query, limit)
-
-	listResp, err := listCall.Do()
-	if err != nil {
-		return nil, fmt.Errorf("failed to list Gmail messages: %w", err)
+	// Set a higher limit per page for full sync with pagination support
+	pageLimit := int64(500) // Increased from 100 to 500 per page
+	totalLimit := int64(options.Limit)
+	if totalLimit <= 0 {
+		totalLimit = 1000 // Default total limit increased to 1000
 	}
 
-	if len(listResp.Messages) == 0 {
+	s.logger.Debug("Fetching Gmail messages (unified) with query: %s, page_limit: %d, total_limit: %d", query, pageLimit, totalLimit)
+
+	var allMessageRefs []*gmail.Message
+	pageToken := ""
+	pageCount := 0
+	totalFetched := int64(0)
+
+	// Paginate through all message lists
+	for {
+		listCall := service.Users.Messages.List("me").Q(query).MaxResults(pageLimit)
+		if pageToken != "" {
+			listCall = listCall.PageToken(pageToken)
+		}
+
+		listResp, err := listCall.Do()
+		if err != nil {
+			s.logger.Error("Failed to list Gmail messages on page %d: %v", pageCount+1, err)
+			return nil, fmt.Errorf("failed to list Gmail messages: %w", err)
+		}
+
+		pageCount++
+		s.logger.Debug("Gmail Messages List API Response (page %d):", pageCount)
+		s.logger.Debug("  - Messages count: %d", len(listResp.Messages))
+		s.logger.Debug("  - Next Page Token: %s", listResp.NextPageToken)
+
+		if len(listResp.Messages) == 0 {
+			break
+		}
+
+		// Add messages from this page
+		for _, msgRef := range listResp.Messages {
+			if totalFetched >= totalLimit {
+				s.logger.Info("Reached total limit of %d messages", totalLimit)
+				goto fetchDetails
+			}
+			allMessageRefs = append(allMessageRefs, &gmail.Message{Id: msgRef.Id})
+			totalFetched++
+		}
+
+		// Check if there are more pages
+		if listResp.NextPageToken == "" {
+			break
+		}
+		pageToken = listResp.NextPageToken
+
+		// Safety check to prevent infinite loops
+		if pageCount >= 50 {
+			s.logger.Warn("Reached maximum page limit (50) for Messages List API, stopping pagination")
+			break
+		}
+	}
+
+fetchDetails:
+	s.logger.Debug("Processed %d pages from Gmail Messages List API, collected %d message IDs", pageCount, len(allMessageRefs))
+
+	if len(allMessageRefs) == 0 {
 		s.logger.Debug("No messages found in unified full sync")
 		return []*gmail.Message{}, nil
 	}
 
-	// Fetch full message details
+	// Fetch full message details for all collected messages
 	var messages []*gmail.Message
-	for _, msgRef := range listResp.Messages {
+	for i, msgRef := range allMessageRefs {
 		msg, err := service.Users.Messages.Get("me", msgRef.Id).Do()
 		if err != nil {
 			s.logger.Warn("Failed to get message %s: %v", msgRef.Id, err)
 			continue
 		}
 		messages = append(messages, msg)
+
+		// Log progress for large batches
+		if i > 0 && i%100 == 0 {
+			s.logger.Info("Fetched details for %d/%d messages...", i, len(allMessageRefs))
+		}
 	}
 
-	s.logger.Info("Gmail unified full sync: fetched %d messages", len(messages))
+	s.logger.Debug("Gmail unified full sync: fetched %d messages across %d pages", len(messages), pageCount)
 	return messages, nil
 }
 

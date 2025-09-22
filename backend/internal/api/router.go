@@ -8,11 +8,17 @@ import (
 )
 
 // NewRouter creates a new router with all the necessary routes.
-func NewRouter(handler *APIHandler, openAIHandler *OpenAIHandler) http.Handler {
+func NewRouter(handler *APIHandler, openAIHandler *OpenAIHandler, wsHandler *WebSocketHandler, syncHandlers *SyncHandlers) http.Handler {
 	router := mux.NewRouter()
 
 	// Create API subrouter with /api prefix
 	apiRouter := router.PathPrefix("/api").Subrouter()
+
+	// Plugin management
+	apiRouter.HandleFunc("/plugins", handler.ListPluginsHandler).Methods("GET")
+	apiRouter.HandleFunc("/plugins/ui/schemas", handler.GetPluginUISchemas).Methods("GET")
+	apiRouter.HandleFunc("/plugins/ui/schema", handler.GetPluginUISchema).Methods("GET")
+	apiRouter.HandleFunc("/plugins/{pluginID}/callbacks/{callback}", handler.HandlePluginCallback).Methods("POST")
 
 	// Health check
 	apiRouter.HandleFunc("/health", HealthCheck).Methods("GET")
@@ -25,6 +31,7 @@ func NewRouter(handler *APIHandler, openAIHandler *OpenAIHandler) http.Handler {
 	apiRouter.HandleFunc("/accounts/{id}", handler.UpdateAccountHandler).Methods("PUT")
 	apiRouter.HandleFunc("/accounts/{id}", handler.DeleteAccountHandler).Methods("DELETE")
 	apiRouter.HandleFunc("/accounts/verify", handler.VerifyAccountHandler).Methods("POST")
+	apiRouter.HandleFunc("/accounts/batch-verify", handler.BatchVerifyAccountsHandler).Methods("POST")
 
 	// Account-specific email operations (moved to account-emails category)
 	apiRouter.HandleFunc("/account-emails/fetch/{id}", handler.FetchAndStoreEmailsHandler).Methods("POST")
@@ -111,6 +118,34 @@ func NewRouter(handler *APIHandler, openAIHandler *OpenAIHandler) http.Handler {
 
 	// Immediate email fetch endpoint
 	apiRouter.HandleFunc("/emails/fetch-now", handler.FetchNowHandler).Methods("POST")
+
+	// WebSocket和通知相关端点
+	apiRouter.HandleFunc("/ws/notifications", wsHandler.HandleWebSocket)
+	apiRouter.HandleFunc("/notifications/stats", wsHandler.HandleNotificationStats).Methods("GET")
+	apiRouter.HandleFunc("/notifications/recent", wsHandler.HandleRecentNotifications).Methods("GET")
+
+	// 同步监控相关端点
+	apiRouter.HandleFunc("/sync/queue-metrics", handler.GetQueueMetricsHandler).Methods("GET")
+	apiRouter.HandleFunc("/sync/account-status", handler.GetAccountSyncStatusHandler).Methods("GET")
+	apiRouter.HandleFunc("/sync/manager-stats", handler.GetSyncManagerStatsHandler).Methods("GET")
+
+	// Sync configuration endpoints
+	apiRouter.HandleFunc("/accounts/{id}/sync-config", syncHandlers.GetAccountSyncConfig).Methods("GET")
+	apiRouter.HandleFunc("/accounts/{id}/sync-config", syncHandlers.CreateAccountSyncConfig).Methods("POST")
+	apiRouter.HandleFunc("/accounts/{id}/sync-config", syncHandlers.UpdateAccountSyncConfig).Methods("PUT")
+	apiRouter.HandleFunc("/accounts/{id}/sync-config", syncHandlers.DeleteAccountSyncConfig).Methods("DELETE")
+	apiRouter.HandleFunc("/accounts/{id}/sync-config/effective", syncHandlers.GetEffectiveSyncConfig).Methods("GET")
+	apiRouter.HandleFunc("/accounts/{id}/sync-config/temporary", syncHandlers.CreateTemporarySyncConfig).Methods("POST")
+	apiRouter.HandleFunc("/accounts/{id}/sync-now", syncHandlers.SyncNow).Methods("POST")
+	apiRouter.HandleFunc("/accounts/{id}/mailboxes", syncHandlers.GetAccountMailboxes).Methods("GET")
+
+	// Sync global configuration
+	apiRouter.HandleFunc("/sync/global-config", syncHandlers.GetGlobalSyncConfig).Methods("GET")
+	apiRouter.HandleFunc("/sync/global-config", syncHandlers.UpdateGlobalSyncConfig).Methods("PUT")
+	apiRouter.HandleFunc("/sync/configs", syncHandlers.GetAllSyncConfigs).Methods("GET")
+
+	// Batch sync configuration
+	apiRouter.HandleFunc("/sync/batch-config", syncHandlers.BatchCreateOrUpdateAccountSyncConfig).Methods("POST")
 
 	// Swagger documentation
 	router.PathPrefix("/swagger/").Handler(httpSwagger.WrapHandler)

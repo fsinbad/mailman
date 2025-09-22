@@ -212,6 +212,26 @@ export class EmailAccountService {
     }
 
     /**
+     * 批量验证账户连接
+     */
+    async batchVerifyAccounts(accountIds: number[]): Promise<{
+        success_count: number;
+        error_count: number;
+        results: Array<{
+            account_id: number;
+            email_address: string;
+            success: boolean;
+            message?: string;
+            error?: string;
+        }>;
+    }> {
+        const response = await apiClient.post('/accounts/batch-verify', {
+            account_ids: accountIds
+        })
+        return response
+    }
+
+    /**
      * 获取支持的邮件服务商列表
      */
     async getProviders(): Promise<any[]> {

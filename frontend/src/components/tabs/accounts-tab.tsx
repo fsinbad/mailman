@@ -1,14 +1,16 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Plus, Search, MoreVertical, Edit2, Trash2, RefreshCw, CheckCircle, XCircle, AlertCircle, Grid, List, Table, ChevronLeft, ChevronRight, Shield, ShieldCheck, Mail, Inbox, ChevronDown, X, Settings } from 'lucide-react'
+import { Plus, Search, MoreVertical, Edit2, Trash2, RefreshCw, CheckCircle, XCircle, AlertCircle, Grid, List, Table, ChevronLeft, ChevronRight, Shield, ShieldCheck, Mail, Inbox, ChevronDown, X, Settings, Square, CheckSquare, Clock, Loader2 } from 'lucide-react'
 import { emailAccountService } from '@/services/email-account.service'
 import { oauth2Service } from '@/services/oauth2.service'
 import { EmailAccount } from '@/types'
 import { cn } from '@/lib/utils'
 import AddAccountModal from '@/components/modals/add-account-modal'
+import EnhancedAddAccountModal from '@/components/modals/enhanced-add-account-modal'
 import EditAccountModal from '@/components/modals/edit-account-modal'
 import SyncAccountModal from '@/components/modals/sync-account-modal'
+import BatchSyncConfigModal from '@/components/modals/batch-sync-config-modal'
 
 // 视图类型
 type ViewType = 'grid' | 'list' | 'table'
@@ -103,12 +105,14 @@ export default function AccountsTab() {
     const [searchQuery, setSearchQuery] = useState('')
     const [selectedAccount, setSelectedAccount] = useState<EmailAccount | null>(null)
     const [showAddModal, setShowAddModal] = useState(false)
+    const [showEnhancedAddModal, setShowEnhancedAddModal] = useState(false)
     const [showEditModal, setShowEditModal] = useState(false)
     const [showSyncModal, setShowSyncModal] = useState(false)
+    const [showBatchSyncConfigModal, setShowBatchSyncConfigModal] = useState(false)
     const [syncingAccount, setSyncingAccount] = useState<EmailAccount | null>(null)
     const [syncing, setSyncing] = useState<number | null>(null)
     const [verifying, setVerifying] = useState<number | null>(null)
-    const [viewType, setViewType] = useState<ViewType>('grid')
+    const [viewType, setViewType] = useState<ViewType>('list')
     const [pagination, setPagination] = useState({
         page: 1,
         limit: 10,
@@ -116,9 +120,14 @@ export default function AccountsTab() {
         totalPages: 0
     })
 
+    // 批量选择状态
+    const [selectedAccounts, setSelectedAccounts] = useState<number[]>([])
+    const [isSelectAll, setIsSelectAll] = useState(false)
+
     // 下拉菜单状态
     const [showAddDropdown, setShowAddDropdown] = useState(false)
     const [gmailOAuth2Available, setGmailOAuth2Available] = useState(false)
+    const [outlookOAuth2Available, setOutlookOAuth2Available] = useState(false)
 
     // 模态框预设参数
     const [modalPresets, setModalPresets] = useState<{
@@ -132,7 +141,7 @@ export default function AccountsTab() {
 
     useEffect(() => {
         loadAccounts()
-        checkGmailOAuth2Availability()
+        checkOAuth2Availability()
     }, [pagination.page, pagination.limit])
 
     // 监听来自OAuth2配置页面的过滤事件
@@ -153,15 +162,19 @@ export default function AccountsTab() {
         }
     }, [])
 
-    // 检测Gmail OAuth2配置可用性
-    const checkGmailOAuth2Availability = async () => {
+    // 检测OAuth2配置可用性
+    const checkOAuth2Availability = async () => {
         try {
-            const configs = await oauth2Service.getGlobalConfigs()
-            const gmailConfig = configs.find(config => config.provider_type === 'gmail')
-            setGmailOAuth2Available(!!gmailConfig && gmailConfig.is_enabled)
+            // 使用isProviderConfigured方法检查完整的配置
+            const gmailAvailable = await oauth2Service.isProviderConfigured('gmail')
+            const outlookAvailable = await oauth2Service.isProviderConfigured('outlook')
+
+            setGmailOAuth2Available(gmailAvailable)
+            setOutlookOAuth2Available(outlookAvailable)
         } catch (error) {
-            console.error('Failed to check Gmail OAuth2 availability:', error)
+            console.error('Failed to check OAuth2 availability:', error)
             setGmailOAuth2Available(false)
+            setOutlookOAuth2Available(false)
         }
     }
 
@@ -249,23 +262,130 @@ export default function AccountsTab() {
 
     const handlePageChange = (page: number) => {
         setPagination(prev => ({ ...prev, page }))
+        // 清除当前页面的选择状态
+        setSelectedAccounts([])
+        setIsSelectAll(false)
     }
 
-    // 处理Gmail OAuth2快捷创建
+    // 批量选择处理函数
+    const handleSelectAccount = (accountId: number, isSelected: boolean) => {
+        if (isSelected) {
+            setSelectedAccounts(prev => [...prev, accountId])
+        } else {
+            setSelectedAccounts(prev => prev.filter(id => id !== accountId))
+        }
+    }
+
+    const handleSelectAll = (isSelected: boolean) => {
+        setIsSelectAll(isSelected)
+        if (isSelected) {
+            setSelectedAccounts(paginatedAccounts.map(account => account.id))
+        } else {
+            setSelectedAccounts([])
+        }
+    }
+
+    // 批量删除处理函数
+    const handleBatchDelete = async () => {
+        if (selectedAccounts.length === 0) return
+
+        const confirmMessage = `确定要删除选中的 ${selectedAccounts.length} 个账户吗？此操作不可撤销。`
+        if (!confirm(confirmMessage)) return
+
+        try {
+            // 批量删除账户
+            await Promise.all(
+                selectedAccounts.map(accountId =>
+                    emailAccountService.deleteAccount(accountId)
+                )
+            )
+
+            // 清除选择状态
+            setSelectedAccounts([])
+            setIsSelectAll(false)
+
+            // 重新加载账户列表
+            await loadAccounts()
+
+            alert(`成功删除 ${selectedAccounts.length} 个账户`)
+        } catch (error) {
+            console.error('Failed to batch delete accounts:', error)
+            alert('批量删除账户失败')
+        }
+    }
+
+    // 批量同步配置处理函数
+    const handleBatchSyncConfig = () => {
+        if (selectedAccounts.length === 0) return
+        setShowBatchSyncConfigModal(true)
+    }
+
+    // 批量同步配置成功回调
+    const handleBatchSyncConfigSuccess = () => {
+        setShowBatchSyncConfigModal(false)
+        // 可选：重新加载账户列表以获取最新的同步状态
+        loadAccounts()
+    }
+
+    // 批量验证处理函数
+    const handleBatchVerify = async () => {
+        if (selectedAccounts.length === 0) return
+
+        const confirmMessage = `确定要验证选中的 ${selectedAccounts.length} 个账户的连接性吗？`
+        if (!confirm(confirmMessage)) return
+
+        try {
+            setLoading(true)
+            const accountIds = selectedAccounts.map(id => id)
+            const response = await emailAccountService.batchVerifyAccounts(accountIds)
+
+            // 显示验证结果
+            let message = `验证完成：成功 ${response.success_count} 个，失败 ${response.error_count} 个`
+            if (response.error_count > 0) {
+                const failedEmails = response.results
+                    .filter(result => !result.success)
+                    .map(result => result.email_address)
+                    .slice(0, 3)
+                    .join(', ')
+                message += `\n失败的账户：${failedEmails}${response.error_count > 3 ? ' 等' : ''}`
+            }
+
+            alert(message)
+            loadAccounts() // 重新加载账户列表以获取最新验证状态
+        } catch (error) {
+            console.error('Failed to batch verify accounts:', error)
+            alert('批量验证失败')
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    // 处理Gmail OAuth2快捷创建（使用增强模态框）
     const handleGmailOAuth2QuickCreate = () => {
         setModalPresets({
             provider: 'gmail',
             authType: 'oauth2',
             autoTriggerOAuth2: true
         })
-        setShowAddModal(true)
+        setShowEnhancedAddModal(true)
         setShowAddDropdown(false)
     }
 
-    // 处理普通添加账户
+    // 处理Outlook OAuth2快捷创建（使用增强模态框）
+    const handleOutlookOAuth2QuickCreate = () => {
+        setModalPresets({
+            provider: 'outlook',
+            authType: 'oauth2',
+            autoTriggerOAuth2: true
+        })
+        setShowEnhancedAddModal(true)
+        setShowAddDropdown(false)
+    }
+
+    // 处理普通添加账户（使用增强模态框）
     const handleRegularAddAccount = () => {
         setModalPresets({})
-        setShowAddModal(true)
+        setShowEnhancedAddModal(true)
         setShowAddDropdown(false)
     }
 
@@ -410,6 +530,51 @@ export default function AccountsTab() {
                         )}
                     </div>
                     <div className="flex items-center space-x-3">
+                        {/* 批量操作按钮 */}
+                        {selectedAccounts.length > 0 && (
+                            <div className="flex items-center space-x-2">
+                                <span className="text-sm text-gray-600 dark:text-gray-400">
+                                    已选择 {selectedAccounts.length} 项
+                                </span>
+                                <button
+                                    onClick={handleBatchDelete}
+                                    className="flex items-center space-x-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700"
+                                >
+                                    <Trash2 className="h-4 w-4" />
+                                    <span>批量删除</span>
+                                </button>
+                                <button
+                                    onClick={handleBatchSyncConfig}
+                                    className="flex items-center space-x-1 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+                                >
+                                    <Clock className="h-4 w-4" />
+                                    <span>批量同步配置</span>
+                                </button>
+                                <button
+                                    onClick={handleBatchVerify}
+                                    disabled={loading}
+                                    className="flex items-center space-x-1 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {loading ? (
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                    ) : (
+                                        <CheckCircle className="h-4 w-4" />
+                                    )}
+                                    <span>{loading ? '验证中...' : '批量验证'}</span>
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setSelectedAccounts([])
+                                        setIsSelectAll(false)
+                                    }}
+                                    className="flex items-center space-x-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+                                >
+                                    <X className="h-4 w-4" />
+                                    <span>取消选择</span>
+                                </button>
+                            </div>
+                        )}
+
                         {/* 视图切换按钮 */}
                         <div className="flex items-center rounded-lg bg-gray-100 p-1 dark:bg-gray-800">
                             <button
@@ -486,6 +651,19 @@ export default function AccountsTab() {
                                             </div>
                                         </button>
                                     )}
+
+                                    {outlookOAuth2Available && (
+                                        <button
+                                            onClick={handleOutlookOAuth2QuickCreate}
+                                            className="flex w-full items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                                        >
+                                            <Mail className="mr-3 h-4 w-4 text-blue-500" />
+                                            <div className="flex flex-col items-start">
+                                                <span>快速添加 Outlook</span>
+                                                <span className="text-xs text-gray-500 dark:text-gray-400">使用 OAuth2 一键授权</span>
+                                            </div>
+                                        </button>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -500,7 +678,7 @@ export default function AccountsTab() {
                         </p>
                         {!searchQuery && (
                             <button
-                                onClick={() => setShowAddModal(true)}
+                                onClick={() => setShowEnhancedAddModal(true)}
                                 className="mt-4 text-primary-600 hover:text-primary-700"
                             >
                                 添加第一个账户
@@ -627,12 +805,65 @@ export default function AccountsTab() {
                         ) : viewType === 'list' ? (
                             // 列表视图
                             <div className="space-y-3">
+                                {/* 全选控件 */}
+                                {paginatedAccounts.length > 0 && (
+                                    <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-700">
+                                        <div className="flex items-center space-x-3">
+                                            <button
+                                                onClick={() => handleSelectAll(!isSelectAll)}
+                                                className="flex items-center space-x-2 text-sm font-medium text-gray-700 dark:text-gray-300"
+                                            >
+                                                {isSelectAll || selectedAccounts.length === paginatedAccounts.length ? (
+                                                    <CheckSquare className="h-5 w-5 text-primary-600" />
+                                                ) : selectedAccounts.length > 0 ? (
+                                                    <div className="relative">
+                                                        <Square className="h-5 w-5 text-gray-400" />
+                                                        <div className="absolute inset-0 flex items-center justify-center">
+                                                            <div className="h-2 w-2 bg-primary-600 rounded-sm"></div>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <Square className="h-5 w-5 text-gray-400" />
+                                                )}
+                                                <span>
+                                                    {isSelectAll || selectedAccounts.length === paginatedAccounts.length
+                                                        ? '取消全选'
+                                                        : selectedAccounts.length > 0
+                                                            ? `已选择 ${selectedAccounts.length}/${paginatedAccounts.length}`
+                                                            : '全选'}
+                                                </span>
+                                            </button>
+                                        </div>
+                                        {selectedAccounts.length > 0 && (
+                                            <div className="text-sm text-gray-600 dark:text-gray-400">
+                                                点击右上角的批量删除按钮进行操作
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
                                 {paginatedAccounts.map((account) => (
                                     <div
                                         key={account.id}
-                                        className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-4 transition-shadow hover:shadow-md dark:border-gray-700 dark:bg-gray-800"
+                                        className={cn(
+                                            "flex items-center justify-between rounded-lg border bg-white p-4 transition-all hover:shadow-md dark:bg-gray-800",
+                                            selectedAccounts.includes(account.id)
+                                                ? "border-primary-500 bg-primary-50 dark:border-primary-400 dark:bg-primary-900/20"
+                                                : "border-gray-200 dark:border-gray-700"
+                                        )}
                                     >
                                         <div className="flex items-center space-x-4">
+                                            {/* 复选框 */}
+                                            <button
+                                                onClick={() => handleSelectAccount(account.id, !selectedAccounts.includes(account.id))}
+                                                className="flex items-center justify-center"
+                                            >
+                                                {selectedAccounts.includes(account.id) ? (
+                                                    <CheckSquare className="h-5 w-5 text-primary-600" />
+                                                ) : (
+                                                    <Square className="h-5 w-5 text-gray-400 hover:text-gray-600" />
+                                                )}
+                                            </button>
                                             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-white font-semibold">
                                                 {account.emailAddress.charAt(0).toUpperCase()}
                                             </div>
@@ -725,6 +956,25 @@ export default function AccountsTab() {
                                 <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                                     <thead className="bg-gray-50 dark:bg-gray-900">
                                         <tr>
+                                            <th className="px-6 py-3 text-left">
+                                                <button
+                                                    onClick={() => handleSelectAll(!isSelectAll)}
+                                                    className="flex items-center space-x-2"
+                                                >
+                                                    {isSelectAll || selectedAccounts.length === paginatedAccounts.length ? (
+                                                        <CheckSquare className="h-5 w-5 text-primary-600" />
+                                                    ) : selectedAccounts.length > 0 ? (
+                                                        <div className="relative">
+                                                            <Square className="h-5 w-5 text-gray-400" />
+                                                            <div className="absolute inset-0 flex items-center justify-center">
+                                                                <div className="h-2 w-2 bg-primary-600 rounded-sm"></div>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <Square className="h-5 w-5 text-gray-400" />
+                                                    )}
+                                                </button>
+                                            </th>
                                             <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                                                 邮箱账户
                                             </th>
@@ -744,7 +994,25 @@ export default function AccountsTab() {
                                     </thead>
                                     <tbody className="divide-y divide-gray-200 bg-white dark:divide-gray-700 dark:bg-gray-800">
                                         {paginatedAccounts.map((account) => (
-                                            <tr key={account.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+                                            <tr
+                                                key={account.id}
+                                                className={cn(
+                                                    "hover:bg-gray-50 dark:hover:bg-gray-700",
+                                                    selectedAccounts.includes(account.id) && "bg-primary-50 dark:bg-primary-900/20"
+                                                )}
+                                            >
+                                                <td className="whitespace-nowrap px-6 py-4">
+                                                    <button
+                                                        onClick={() => handleSelectAccount(account.id, !selectedAccounts.includes(account.id))}
+                                                        className="flex items-center justify-center"
+                                                    >
+                                                        {selectedAccounts.includes(account.id) ? (
+                                                            <CheckSquare className="h-5 w-5 text-primary-600" />
+                                                        ) : (
+                                                            <Square className="h-5 w-5 text-gray-400 hover:text-gray-600" />
+                                                        )}
+                                                    </button>
+                                                </td>
                                                 <td className="whitespace-nowrap px-6 py-4">
                                                     <div className="flex items-center">
                                                         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-white font-semibold">
@@ -890,7 +1158,7 @@ export default function AccountsTab() {
                 )}
             </div>
 
-            {/* 添加账户模态框 */}
+            {/* 原始添加账户模态框 */}
             <AddAccountModal
                 isOpen={showAddModal}
                 onClose={() => {
@@ -899,6 +1167,23 @@ export default function AccountsTab() {
                 }}
                 onSuccess={() => {
                     setShowAddModal(false)
+                    setModalPresets({})
+                    loadAccounts()
+                }}
+                presetProvider={modalPresets.provider}
+                presetAuthType={modalPresets.authType}
+                autoTriggerOAuth2={modalPresets.autoTriggerOAuth2}
+            />
+
+            {/* 增强添加账户模态框 */}
+            <EnhancedAddAccountModal
+                isOpen={showEnhancedAddModal}
+                onClose={() => {
+                    setShowEnhancedAddModal(false)
+                    setModalPresets({})
+                }}
+                onSuccess={() => {
+                    setShowEnhancedAddModal(false)
                     setModalPresets({})
                     loadAccounts()
                 }}
@@ -935,6 +1220,16 @@ export default function AccountsTab() {
                     onSuccess={handleSyncConfirm}
                 />
             )}
+
+            {/* 批量同步配置模态框 */}
+            <BatchSyncConfigModal
+                isOpen={showBatchSyncConfigModal}
+                onClose={() => setShowBatchSyncConfigModal(false)}
+                onSuccess={handleBatchSyncConfigSuccess}
+                selectedAccounts={selectedAccounts.map(id =>
+                    accounts.find(account => account.id === id)!
+                ).filter(Boolean)}
+            />
         </>
     )
 }

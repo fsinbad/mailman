@@ -1,6 +1,7 @@
 package api
 
 import (
+	"mailman/internal/repository"
 	"mailman/internal/services"
 	"mailman/internal/utils"
 	"net/http"
@@ -10,7 +11,23 @@ import (
 )
 
 // NewRouterWithAuth creates a new router with authentication middleware
-func NewRouterWithAuth(handler *APIHandler, openAIHandler *OpenAIHandler, authHandler *AuthHandler, syncHandlers *SyncHandlers, sessionHandler *SessionHandler, triggerHandler *TriggerAPIHandler, oauth2Handler *OAuth2Handler, authService *services.AuthService) http.Handler {
+func NewRouterWithAuth(
+	handler *APIHandler,
+	openAIHandler *OpenAIHandler,
+	authHandler *AuthHandler,
+	syncHandlers *SyncHandlers,
+	sessionHandler *SessionHandler,
+	triggerHandler *TriggerAPIHandler,
+	oauth2Handler *OAuth2Handler,
+	systemConfigHandler *SystemConfigHandler,
+	webSocketHandler *WebSocketHandler,
+	authService *services.AuthService,
+	emailTriggerService *services.EmailTriggerService,
+	emailTriggerV2Repo *repository.EmailTriggerV2Repository,
+	triggerExecutionLogV2Repo *repository.TriggerExecutionLogV2Repository,
+	pluginManager *services.PluginManager,
+	conditionEngine *services.ConditionEngine,
+) http.Handler {
 	router := mux.NewRouter()
 
 	// Create logger for HTTP logging
@@ -34,6 +51,7 @@ func NewRouterWithAuth(handler *APIHandler, openAIHandler *OpenAIHandler, authHa
 
 	// Public WebSocket endpoints (no auth required)
 	apiRouter.HandleFunc("/ws/wait-email", handler.WaitEmailWebSocketHandler).Methods("GET")
+	apiRouter.HandleFunc("/ws/notifications", webSocketHandler.HandleWebSocket).Methods("GET")
 
 	// Create authenticated subrouter
 	authRouter := apiRouter.PathPrefix("").Subrouter()
@@ -58,6 +76,7 @@ func NewRouterWithAuth(handler *APIHandler, openAIHandler *OpenAIHandler, authHa
 	authRouter.HandleFunc("/accounts/{id}", handler.UpdateAccountHandler).Methods("PUT")
 	authRouter.HandleFunc("/accounts/{id}", handler.DeleteAccountHandler).Methods("DELETE")
 	authRouter.HandleFunc("/accounts/verify", handler.VerifyAccountHandler).Methods("POST")
+	authRouter.HandleFunc("/accounts/batch-verify", handler.BatchVerifyAccountsHandler).Methods("POST")
 
 	// Activity logs (protected)
 	authRouter.HandleFunc("/activities/recent", GetRecentActivities).Methods("GET")
@@ -143,6 +162,15 @@ func NewRouterWithAuth(handler *APIHandler, openAIHandler *OpenAIHandler, authHa
 	// Dashboard statistics endpoint (protected)
 	authRouter.HandleFunc("/dashboard/stats", handler.GetEmailStatsHandler).Methods("GET")
 
+	// WebSocket和通知相关端点 (protected)
+	authRouter.HandleFunc("/notifications/stats", webSocketHandler.HandleNotificationStats).Methods("GET")
+	authRouter.HandleFunc("/notifications/recent", webSocketHandler.HandleRecentNotifications).Methods("GET")
+
+	// 同步监控相关端点 (protected)
+	authRouter.HandleFunc("/sync/queue-metrics", handler.GetQueueMetricsHandler).Methods("GET")
+	authRouter.HandleFunc("/sync/account-status", handler.GetAccountSyncStatusHandler).Methods("GET")
+	authRouter.HandleFunc("/sync/manager-stats", handler.GetSyncManagerStatsHandler).Methods("GET")
+
 	// Immediate email fetch endpoint (protected)
 	authRouter.HandleFunc("/emails/fetch-now", handler.FetchNowHandler).Methods("POST")
 
@@ -160,7 +188,10 @@ func NewRouterWithAuth(handler *APIHandler, openAIHandler *OpenAIHandler, authHa
 	authRouter.HandleFunc("/sync/global-config", syncHandlers.GetGlobalSyncConfig).Methods("GET")
 	authRouter.HandleFunc("/sync/global-config", syncHandlers.UpdateGlobalSyncConfig).Methods("PUT")
 
-	// Trigger endpoints (protected)
+	// Batch sync configuration (protected)
+	authRouter.HandleFunc("/sync/batch-config", syncHandlers.BatchCreateOrUpdateAccountSyncConfig).Methods("POST")
+
+	// Legacy Trigger endpoints (protected) - 保持向后兼容
 	authRouter.HandleFunc("/triggers", triggerHandler.CreateTriggerHandler).Methods("POST")
 	authRouter.HandleFunc("/triggers", triggerHandler.GetTriggersHandler).Methods("GET")
 	authRouter.HandleFunc("/triggers/{id}", triggerHandler.GetTriggerHandler).Methods("GET")
@@ -168,8 +199,36 @@ func NewRouterWithAuth(handler *APIHandler, openAIHandler *OpenAIHandler, authHa
 	authRouter.HandleFunc("/triggers/{id}", triggerHandler.DeleteTriggerHandler).Methods("DELETE")
 	authRouter.HandleFunc("/triggers/{id}/enable", triggerHandler.EnableTriggerHandler).Methods("POST")
 	authRouter.HandleFunc("/triggers/{id}/disable", triggerHandler.DisableTriggerHandler).Methods("POST")
+	authRouter.HandleFunc("/triggers/evaluate-expression", triggerHandler.EvaluateExpressionHandler).Methods("POST")
+	authRouter.HandleFunc("/triggers/execute-action", triggerHandler.ExecuteActionHandler).Methods("POST")
+	authRouter.HandleFunc("/triggers/execute-actions", triggerHandler.ExecuteActionsHandler).Methods("POST")
 	authRouter.HandleFunc("/trigger-logs", triggerHandler.GetTriggerExecutionLogsHandler).Methods("GET")
 	authRouter.HandleFunc("/trigger-stats", triggerHandler.GetTriggerStatsHandler).Methods("GET")
+
+	// TriggerV2 endpoints (protected) - 新一代触发器API
+	v2Router := authRouter.PathPrefix("/v2").Subrouter()
+	v2Router.HandleFunc("/triggers", triggerHandler.CreateTriggerV2Handler).Methods("POST")
+	v2Router.HandleFunc("/triggers", triggerHandler.GetTriggersV2Handler).Methods("GET")
+	v2Router.HandleFunc("/triggers/{id}", triggerHandler.GetTriggerV2Handler).Methods("GET")
+	v2Router.HandleFunc("/triggers/{id}", triggerHandler.UpdateTriggerV2Handler).Methods("PUT")
+	v2Router.HandleFunc("/triggers/{id}", triggerHandler.DeleteTriggerHandler).Methods("DELETE")                   // 复用Legacy删除逻辑
+	v2Router.HandleFunc("/triggers/{id}/enable", triggerHandler.EnableTriggerHandler).Methods("POST")              // 复用Legacy启用逻辑
+	v2Router.HandleFunc("/triggers/{id}/disable", triggerHandler.DisableTriggerHandler).Methods("POST")            // 复用Legacy禁用逻辑
+	v2Router.HandleFunc("/triggers/evaluate-expression", triggerHandler.EvaluateExpressionHandler).Methods("POST") // 复用Legacy表达式评估
+	v2Router.HandleFunc("/triggers/execute-action", triggerHandler.ExecuteActionHandler).Methods("POST")           // 复用Legacy动作执行
+	v2Router.HandleFunc("/triggers/execute-actions", triggerHandler.ExecuteActionsHandler).Methods("POST")         // 复用Legacy批量动作执行
+
+	// Create EmailTriggerV2Controller
+	emailTriggerV2Controller := NewEmailTriggerV2Controller(
+		emailTriggerService,
+		emailTriggerV2Repo,
+		triggerExecutionLogV2Repo,
+		pluginManager,
+		conditionEngine,
+	)
+
+	// Register all Email Trigger V2 routes
+	emailTriggerV2Controller.RegisterRoutes(v2Router)
 
 	// Activity log endpoints (protected)
 	authRouter.HandleFunc("/activities/recent", GetRecentActivities).Methods("GET")
@@ -194,6 +253,19 @@ func NewRouterWithAuth(handler *APIHandler, openAIHandler *OpenAIHandler, authHa
 	authRouter.HandleFunc("/oauth2/session/start/{provider}", oauth2Handler.StartOAuth2Session).Methods("POST")
 	authRouter.HandleFunc("/oauth2/session/poll/{state}", oauth2Handler.PollOAuth2SessionStatus).Methods("GET")
 	authRouter.HandleFunc("/oauth2/session/cancel/{state}", oauth2Handler.CancelOAuth2Session).Methods("POST")
+
+	// System Configuration endpoints (protected)
+	authRouter.HandleFunc("/system-configs", systemConfigHandler.GetAllConfigs).Methods("GET")
+	authRouter.HandleFunc("/system-configs/category/{category}", systemConfigHandler.GetConfigsByCategory).Methods("GET")
+	authRouter.HandleFunc("/system-config/{key}", systemConfigHandler.GetConfigByKey).Methods("GET")
+	authRouter.HandleFunc("/system-config/{key}", systemConfigHandler.UpdateConfigValue).Methods("PUT")
+	authRouter.HandleFunc("/system-config/{key}/reset", systemConfigHandler.ResetConfigToDefault).Methods("POST")
+
+	// Plugin management (protected)
+	authRouter.HandleFunc("/plugins", handler.ListPluginsHandler).Methods("GET")
+	authRouter.HandleFunc("/plugins/ui/schemas", handler.GetPluginUISchemas).Methods("GET")
+	authRouter.HandleFunc("/plugins/ui/schema", handler.GetPluginUISchema).Methods("GET")
+	authRouter.HandleFunc("/plugins/{pluginID}/callbacks/{callback}", handler.HandlePluginCallback).Methods("POST")
 
 	// Swagger documentation (public)
 	router.PathPrefix("/swagger/").Handler(httpSwagger.WrapHandler)

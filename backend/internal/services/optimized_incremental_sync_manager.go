@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"mailman/internal/models"
@@ -42,6 +43,9 @@ type OptimizedIncrementalSyncManager struct {
 	wg             sync.WaitGroup
 	activityLogger *ActivityLogger
 
+	// 监控统计
+	skippedSyncs int64 // 跳过的同步计数
+
 	// 系统配置
 	batchSize    int           // 批处理大小
 	pollInterval time.Duration // 中央轮询间隔
@@ -73,7 +77,7 @@ func NewOptimizedIncrementalSyncManager(
 		fetcher:        fetcher,
 		syncConfigs:    make(map[uint]models.EmailAccountSyncConfig),
 		lastSyncTimes:  make(map[uint]time.Time),
-		syncQueue:      make(chan syncJob, 100), // 队列缓冲区
+		syncQueue:      make(chan syncJob, 1000), // 队列缓冲区扩容到1000
 		ctx:            ctx,
 		cancel:         cancel,
 		logger:         utils.NewLogger("OptimizedSyncManager"),
@@ -230,8 +234,11 @@ func (m *OptimizedIncrementalSyncManager) processBatch(ctx context.Context, acco
 			m.logger.Warn("Context canceled while queueing jobs")
 			return
 		default:
-			// 队列已满，记录警告并继续
-			m.logger.Warn("Sync queue full, skipping account %d", accountID)
+			// 队列已满，记录详细警告并继续
+			queueUsage := float64(len(m.syncQueue)) / float64(cap(m.syncQueue)) * 100
+			m.logger.Warn("Sync queue full (%.1f%%), skipping account %d - consider system scaling", queueUsage, accountID)
+			// 增加跳过计数
+			atomic.AddInt64(&m.skippedSyncs, 1)
 		}
 	}
 }
@@ -431,6 +438,29 @@ func (m *OptimizedIncrementalSyncManager) fetchEmails(ctx context.Context, req F
 
 	emails, err := fetcherService.FetchEmailsFromMultipleMailboxes(*account, options)
 	if err != nil {
+		// For Gmail accounts, if incremental sync fails, try fallback to full sync with reset History ID
+		if isGmailAccount {
+			m.logger.Warn("Gmail incremental sync failed, attempting fallback to full sync: %v", err)
+
+			// Reset History ID to force full sync
+			syncConfig, getErr := m.syncConfigRepo.GetByAccountID(account.ID)
+			if getErr == nil && syncConfig.LastHistoryID != "" {
+				m.logger.Info("Resetting History ID '%s' to trigger full sync", syncConfig.LastHistoryID)
+				syncConfig.LastHistoryID = ""
+				if updateErr := m.syncConfigRepo.Update(syncConfig); updateErr != nil {
+					m.logger.Error("Failed to reset History ID for fallback: %v", updateErr)
+				}
+
+				// Retry with cleared History ID
+				retryEmails, retryErr := fetcherService.FetchEmailsFromMultipleMailboxes(*account, options)
+				if retryErr == nil {
+					m.logger.Info("Gmail fallback to full sync succeeded: %d emails", len(retryEmails))
+					return retryEmails, nil
+				} else {
+					m.logger.Error("Gmail fallback to full sync also failed: %v", retryErr)
+				}
+			}
+		}
 		return nil, fmt.Errorf("failed to fetch emails: %w", err)
 	}
 
@@ -865,4 +895,38 @@ func (m *OptimizedIncrementalSyncManager) SyncNow(accountID uint) (*SyncResult, 
 	case <-time.After(3 * time.Minute): // 总超时
 		return nil, fmt.Errorf("sync operation timed out")
 	}
+}
+
+// QueueMetrics 队列监控指标
+type QueueMetrics struct {
+	QueueLength    int     `json:"queue_length"`
+	QueueCapacity  int     `json:"queue_capacity"`
+	UsageRate      float64 `json:"usage_rate"`
+	SkippedSyncs   int64   `json:"skipped_syncs"`
+	ActiveAccounts int     `json:"active_accounts"`
+	WorkerCount    int     `json:"worker_count"`
+}
+
+// GetQueueMetrics 获取队列监控指标
+func (m *OptimizedIncrementalSyncManager) GetQueueMetrics() QueueMetrics {
+	m.configMu.RLock()
+	defer m.configMu.RUnlock()
+
+	queueLength := len(m.syncQueue)
+	queueCapacity := cap(m.syncQueue)
+	usageRate := float64(queueLength) / float64(queueCapacity) * 100
+
+	return QueueMetrics{
+		QueueLength:    queueLength,
+		QueueCapacity:  queueCapacity,
+		UsageRate:      usageRate,
+		SkippedSyncs:   atomic.LoadInt64(&m.skippedSyncs),
+		ActiveAccounts: len(m.syncConfigs),
+		WorkerCount:    3, // 当前固定3个worker
+	}
+}
+
+// ResetSkippedSyncs 重置跳过同步计数
+func (m *OptimizedIncrementalSyncManager) ResetSkippedSyncs() {
+	atomic.StoreInt64(&m.skippedSyncs, 0)
 }

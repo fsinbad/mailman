@@ -145,8 +145,9 @@ func (s *OAuth2GlobalConfigService) IsProviderEnabled(providerType models.MailPr
 }
 
 // GetProviderConfig gets OAuth2 configuration for generating auth URLs
+// 优先使用完整配置进行认证
 func (s *OAuth2GlobalConfigService) GetProviderConfig(providerType models.MailProviderType) (*models.OAuth2GlobalConfig, error) {
-	config, err := s.repo.GetByProviderType(providerType)
+	config, err := s.repo.GetCompleteConfigByProviderType(providerType)
 	if err != nil {
 		return nil, fmt.Errorf("OAuth2 configuration not found for provider %s", providerType)
 	}
@@ -156,4 +157,9 @@ func (s *OAuth2GlobalConfigService) GetProviderConfig(providerType models.MailPr
 	}
 
 	return config, nil
+}
+
+// GetCompleteConfigByProviderType retrieves complete OAuth2 configuration for a specific provider type
+func (s *OAuth2GlobalConfigService) GetCompleteConfigByProviderType(providerType models.MailProviderType) (*models.OAuth2GlobalConfig, error) {
+	return s.repo.GetCompleteConfigByProviderType(providerType)
 }
