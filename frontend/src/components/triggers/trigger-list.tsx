@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { Select } from '@/components/ui/select'
+import { Select, SelectItem } from '@/components/ui/select'
 import {
   Search,
   Filter,
@@ -63,8 +63,7 @@ export function TriggerList({ onEdit, onView, onDelete, onStatusChange, onDebug 
       setIsLoading(false)
     }
   }
-  // 处理
-状态变更
+  // 处理状态变更
   const handleStatusChange = async (trigger: EmailTrigger) => {
     try {
       if (trigger.status === 'enabled') {
@@ -126,8 +125,7 @@ export function TriggerList({ onEdit, onView, onDelete, onStatusChange, onDebug 
       default:
         return '错误'
     }
-  }  // 处理搜
-索
+  }  // 处理搜索
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(e.target.value)
     setPage(1) // 重置到第一页
@@ -157,10 +155,10 @@ export function TriggerList({ onEdit, onView, onDelete, onStatusChange, onDebug 
               </div>
             </div>
             <div className="flex gap-2">
-              <Select value={statusFilter} onChange={handleStatusFilter}>
-                <option value="all">所有状态</option>
-                <option value="enabled">运行中</option>
-                <option value="disabled">已停用</option>
+              <Select value={statusFilter} onValueChange={handleStatusFilter}>
+                <SelectItem value="all">所有状态</SelectItem>
+                <SelectItem value="enabled">运行中</SelectItem>
+                <SelectItem value="disabled">已停用</SelectItem>
               </Select>
             </div>
           </div>
