@@ -25,7 +25,7 @@ Mailman is a Go-based email management service that provides APIs for managing e
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/mailman.git
+git clone https://github.com/seongminhwan/mailman.git
 cd mailman
 ```
 
