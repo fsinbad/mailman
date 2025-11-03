@@ -10,11 +10,15 @@ COPY package*.json ./
 # Install dependencies
 RUN npm ci
 
+# Set environment to avoid downloading SWC binaries for multi-architecture builds
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_BUILD_WORKERS=1
+
 # Copy source code
 COPY . .
 
-# Build the application
-RUN npm run build
+# Build the application (use slower build without SWC to avoid download issues)
+RUN NODE_OPTIONS="--max-old-space-size=4096" npm run build
 
 # Nginx stage
 FROM nginx:alpine

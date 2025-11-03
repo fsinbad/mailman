@@ -1,8 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
     reactStrictMode: true,
-    swcMinify: true,
+    swcMinify: false, // Disable SWC minification to avoid download issues
     output: 'standalone',
+    experimental: {
+        swcPlugins: [], // Disable SWC plugins
+    },
     async rewrites() {
         return [
             {
