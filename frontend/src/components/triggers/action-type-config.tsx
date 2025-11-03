@@ -94,7 +94,7 @@ export function ActionTypeConfig({ actionType, config, onChange }: ActionTypeCon
               <Checkbox
                 id="mark-as-read"
                 checked={!!config.mark_as_read}
-                onCheckedChange={(checked) => handleFieldChange('mark_as_read', checked)}
+                onChange={(e) => handleFieldChange('mark_as_read', e.target.checked)}
               />
               <Label htmlFor="mark-as-read">标记为已读</Label>
             </div>
@@ -160,7 +160,7 @@ export function ActionTypeConfig({ actionType, config, onChange }: ActionTypeCon
               <Checkbox
                 id="include-original"
                 checked={!!config.include_original}
-                onCheckedChange={(checked) => handleFieldChange('include_original', checked)}
+                onChange={(e) => handleFieldChange('include_original', e.target.checked)}
               />
               <Label htmlFor="include-original">包含原始邮件</Label>
             </div>
