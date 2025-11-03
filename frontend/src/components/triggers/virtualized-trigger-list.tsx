@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { Select } from '@/components/ui/select'
+import { Select, SelectItem } from '@/components/ui/select'
 import {
   Search,
   Play,
@@ -332,8 +332,8 @@ export function VirtualizedTriggerList({
   }, [])
 
   // 处理状态过滤
-  const handleStatusFilter = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
-    setStatusFilter(e.target.value)
+  const handleStatusFilter = useCallback((value: string) => {
+    setStatusFilter(value)
     setPage(1) // 重置到第一页
   }, [])
 
@@ -376,10 +376,10 @@ export function VirtualizedTriggerList({
               </div>
             </div>
             <div className="flex gap-2">
-              <Select value={statusFilter} onChange={handleStatusFilter}>
-                <option value="all">所有状态</option>
-                <option value="enabled">运行中</option>
-                <option value="disabled">已停用</option>
+              <Select value={statusFilter} onValueChange={handleStatusFilter}>
+                <SelectItem value="all">所有状态</SelectItem>
+                <SelectItem value="enabled">运行中</SelectItem>
+                <SelectItem value="disabled">已停用</SelectItem>
               </Select>
             </div>
           </div>
