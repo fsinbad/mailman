@@ -395,19 +395,26 @@ export function VirtualizedTriggerList({
           </CardContent>
         </Card>
       ) : triggers.length > 0 ? (
-        <div style={{ height: '600px' }}>
-          <AutoSizer>
-            {({ height, width }) => (
-              <List
-                height={height}
-                width={width}
-                itemCount={triggers.length}
-                itemSize={300} // 估计每个项的高度
-              >
-                {rowRenderer}
-              </List>
-            )}
-          </AutoSizer>
+        {/* TODO: Install react-window and react-virtualized-auto-sizer for virtualization */}
+        <div style={{ height: '600px', overflow: 'auto' }}>
+          {triggers.map((trigger, index) => (
+            <div key={trigger.id} style={{ borderBottom: '1px solid #e5e7eb', padding: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h4 style={{ margin: 0 }}>{trigger.name}</h4>
+                  <p style={{ margin: '4px 0', color: '#666' }}>{trigger.description}</p>
+                </div>
+                <Badge variant={trigger.status === 'enabled' ? 'default' : 'secondary'}>
+                  {trigger.status === 'enabled' ? '运行中' : '已停用'}
+                </Badge>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                <Button size="sm" onClick={() => onView?.(trigger)}>查看</Button>
+                <Button size="sm" onClick={() => onEdit?.(trigger)}>编辑</Button>
+                <Button size="sm" onClick={() => onDebug?.(trigger)}>调试</Button>
+              </div>
+            </div>
+          ))}
         </div>
       ) : (
         <Card>
