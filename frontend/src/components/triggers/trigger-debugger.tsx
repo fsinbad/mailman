@@ -128,7 +128,7 @@ export function TriggerDebugger({ trigger, onSave }: TriggerDebuggerProps) {
         trigger: {
           id: trigger.id,
           name: trigger.name,
-          expressions: trigger.expressions,
+          condition: trigger.condition,
           actions: trigger.actions
         },
         testData: parsedData
@@ -245,8 +245,12 @@ export function TriggerDebugger({ trigger, onSave }: TriggerDebuggerProps) {
   const renderExpressionPreview = () => {
     return (
       <div className="mb-4 p-4 bg-gray-50 border rounded-md">
-        <div className="font-medium mb-2">当前条件表达式:</div>
-        <div className="text-sm">{expressionsToText(trigger.expressions)}</div>
+        <div className="font-medium mb-2">当前条件配置:</div>
+        <div className="text-sm">
+          <div><strong>类型:</strong> {trigger.condition?.type || 'N/A'}</div>
+          <div><strong>脚本:</strong> {trigger.condition?.script ? '已配置' : '未配置'}</div>
+          {trigger.condition?.timeout && <div><strong>超时:</strong> {trigger.condition.timeout}秒</div>}
+        </div>
       </div>
     )
   }
@@ -259,7 +263,7 @@ export function TriggerDebugger({ trigger, onSave }: TriggerDebuggerProps) {
         <div className="text-sm">
           <ol className="list-decimal list-inside">
             {trigger.actions.map((action, index) => (
-              <li key={action.id} className="mb-1">
+              <li key={index} className="mb-1">
                 {action.name || action.type} {!action.enabled && <span className="text-gray-400">(已禁用)</span>}
               </li>
             ))}

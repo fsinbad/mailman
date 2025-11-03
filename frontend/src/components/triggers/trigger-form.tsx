@@ -245,10 +245,12 @@ export function TriggerForm({ triggerId, onSave, onCancel }: TriggerFormProps) {
             </select>
           </div>
           
-          <ConditionBuilder 
-            initialScript={condition.script}
-            onChange={(script) => setCondition({ ...condition, script })}
-            scriptType={condition.type as 'js' | 'gotemplate'}
+          <ConditionBuilder
+            onChange={(expressions) => {
+              // 将表达式��换为脚本格式（这里简化处理）
+              const script = JSON.stringify(expressions)
+              setCondition({ ...condition, script })
+            }}
           />
         </CardContent>
       </Card>
