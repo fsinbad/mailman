@@ -1,0 +1,226 @@
+# Production values for mailman Helm chart
+# Override default values with production-specific settings
+
+# Global configuration
+global:
+  imageRegistry: ghcr.io
+  storageClass: ""
+
+# Mailman application configuration
+mailman:
+  backend:
+    replicaCount: 3
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 2Gi
+      requests:
+        cpu: 1000m
+        memory: 1Gi
+
+    autoscaling:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 80
+
+    env:
+      # Production server configuration
+      SERVER_HOST: "0.0.0.0"
+      SERVER_PORT: 8080
+
+      # Database configuration
+      DB_DRIVER: mysql
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: mailman
+      DB_NAME: mailman
+
+      # Production mode
+      DEV_MODE: false
+
+  frontend:
+    replicaCount: 3
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+      requests:
+        cpu: 500m
+        memory: 512Mi
+
+    autoscaling:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 5
+      targetCPUUtilizationPercentage: 70
+      targetMemoryUtilizationPercentage: 80
+
+    env:
+      NODE_ENV: production
+
+# MySQL production configuration
+mysql:
+  enabled: true
+
+  auth:
+    rootPassword: ""  # Set this via secrets
+    database: mailman
+    username: mailman
+    password: ""      # Set this via secrets
+
+  primary:
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 4Gi
+      requests:
+        cpu: 1000m
+        memory: 2Gi
+
+    persistence:
+      enabled: true
+      storageClass: fast-ssd
+      size: 100Gi
+      accessModes:
+      - ReadWriteOnce
+
+    configuration: |
+      [mysqld]
+      default_authentication_plugin=mysql_native_password
+      character-set-server=utf8mb4
+      collation-server=utf8mb4_unicode_ci
+      max_connections=500
+      innodb_buffer_pool_size=2G
+      innodb_log_file_size=256M
+      innodb_flush_log_at_trx_commit=2
+      slow_query_log=1
+      long_query_time=2
+
+# Ingress configuration
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    kubernetes.io/tls-acme: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+
+  hosts:
+    - host: mailman.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+  tls:
+    - secretName: mailman-tls
+      hosts:
+        - mailman.example.com
+
+# Secret configuration
+secrets:
+  database:
+    existingSecret: mailman-database-prod
+    create: false
+
+  oauth2:
+    existingSecret: mailman-oauth2-prod
+    create: false
+
+  app:
+    existingSecret: mailman-app-prod
+    create: false
+
+# ConfigMap configuration
+configMaps:
+  app:
+    create: true
+    name: mailman-app-config-prod
+    data:
+      # Production OAuth2 redirect URIs
+      GMAIL_REDIRECT_URI: "https://mailman.example.com/api/oauth2/callback/gmail"
+      OUTLOOK_REDIRECT_URI: "https://mailman.example.com/api/oauth2/callback/outlook"
+      FRONTEND_URL: "https://mailman.example.com"
+      OPENAI_BASE_URL: "https://api.openai.com/v1"
+      OPENAI_MODEL: "gpt-3.5-turbo"
+
+# Persistence configuration
+persistence:
+  data:
+    enabled: true
+    storageClass: fast-ssd
+    size: 50Gi
+    accessModes:
+    - ReadWriteOnce
+
+  logs:
+    enabled: true
+    storageClass: fast-ssd
+    size: 20Gi
+    accessModes:
+    - ReadWriteOnce
+
+# Network policies
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+      - namespaceSelector:
+          matchLabels:
+            name: ingress-nginx
+      ports:
+      - protocol: TCP
+        port: 80
+  egress:
+    - to: []
+      ports:
+      - protocol: TCP
+        port: 53
+      - protocol: UDP
+        port: 53
+    - to:
+      - podSelector:
+          matchLabels:
+            app.kubernetes.io/name: mysql
+      ports:
+      - protocol: TCP
+        port: 3306
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+# Monitoring configuration
+monitoring:
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+      path: /metrics
+      port: http
+
+  grafana:
+    enabled: true
+    dashboard:
+      enabled: true
+
+# Backup configuration
+backup:
+  enabled: true
+  schedule: "0 2 * * *"
+  retention: 30
+  storageClass: backup-storage
+  storageSize: 50Gi
+
+# ServiceAccount
+serviceAccount:
+  create: true
+  annotations:
+    iam.gke.io/gcp-service-account: mailman@example.iam.gserviceaccount.com

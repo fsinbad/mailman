@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mailman.fullname" . }}-frontend
+  labels:
+    {{- include "mailman.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+  {{- with .Values.mailman.frontend.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.mailman.frontend.service.type }}
+  ports:
+    - port: {{ .Values.mailman.frontend.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "mailman.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend

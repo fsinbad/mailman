@@ -1,0 +1,48 @@
+{{- /*
+Generate installation notes for the mailman chart
+*/}}
+{{- if .Values.ingress.enabled -}}
+Your Mailman application has been deployed successfully!
+
+To access your Mailman application, use the following URL:
+  http://{{- range .Values.ingress.hosts }}{{ .host }}{{- end }}
+
+{{- if .Values.ingress.tls }}
+HTTPS is enabled. Your application is available at:
+  https://{{- range .Values.ingress.hosts }}{{ .host }}{{- end }}
+{{- end }}
+
+{{- else if .Values.mailman.frontend.service.type -}}
+Your Mailman application has been deployed successfully!
+
+To access your Mailman application, run the following commands:
+
+  export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "mailman.name" . }},app.kubernetes.io/instance={{ .Release.Name }}" -o jsonpath="{.items[0].metadata.name}")
+  export CONTAINER_PORT=$(kubectl get pod --namespace {{ .Release.Namespace }} $POD_NAME -o jsonpath="{.spec.containers[0].ports[0].containerPort}")
+
+  echo "Visit http://127.0.0.1:8080 to use your application"
+  kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:$CONTAINER_PORT
+
+{{- else }}
+Your Mailman application has been deployed successfully!
+{{- end }}
+
+Database Information:
+- MySQL is enabled: {{ .Values.mysql.enabled }}
+- Database name: {{ .Values.mysql.auth.database }}
+- Database user: {{ .Values.mysql.auth.username }}
+- Database host: {{ include "mailman.mysql.fullname" . }}
+
+Next Steps:
+1. Configure your OAuth2 providers (Gmail, Outlook) through the web interface
+2. Set up your email accounts and sync configurations
+3. Configure OpenAI integration for AI features (optional)
+
+For more information, visit:
+- GitHub repository: https://github.com/your-org/mailman
+- Documentation: https://github.com/your-org/mailman/docs
+
+To uninstall the chart, run:
+  helm uninstall {{ .Release.Name }}
+
+Happy emailing! 📧

@@ -1,0 +1,27 @@
+{{- if .Values.mailman.allInOne.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mailman.fullname" . }}-allinone
+  labels:
+    {{- include "mailman.labels" . | nindent 4 }}
+    app.kubernetes.io/component: allinone
+  {{- with .Values.mailman.allInOne.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.mailman.allInOne.service.type }}
+  ports:
+    - port: {{ .Values.mailman.allInOne.service.ports.http | default 80 }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    - port: {{ .Values.mailman.allInOne.service.ports.api | default 8080 }}
+      targetPort: api
+      protocol: TCP
+      name: api
+  selector:
+    {{- include "mailman.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: allinone
+{{- end }}

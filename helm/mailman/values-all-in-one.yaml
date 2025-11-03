@@ -1,0 +1,245 @@
+# All-in-One deployment values for mailman Helm chart
+# Uses the single Docker image that contains both frontend and backend
+
+# Global configuration
+global:
+  imageRegistry: ghcr.io
+  storageClass: ""
+
+# Override MySQL settings for external database (recommended for all-in-one)
+mysql:
+  enabled: false  # Disable bundled MySQL
+
+# Mailman application configuration - All-in-One mode
+mailman:
+  # Backend configuration (disabled - using all-in-one)
+  backend:
+    enabled: false
+    replicaCount: 0
+
+  # Frontend configuration (disabled - using all-in-one)
+  frontend:
+    enabled: false
+    replicaCount: 0
+
+  # All-in-One application configuration
+  allInOne:
+    enabled: true
+
+    # Image configuration
+    image:
+      registry: ghcr.io
+      repository: seongminhwan/mailman-all
+      tag: "latest"
+      pullPolicy: IfNotPresent
+      pullSecrets: []
+
+    # Replica count
+    replicaCount: 1
+
+    # Resource limits and requests
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 2Gi
+      requests:
+        cpu: 1000m
+        memory: 1Gi
+
+    # Horizontal Pod Autoscaler
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 80
+
+    # Pod configuration
+    podAnnotations: {}
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+      readOnlyRootFilesystem: false  # All-in-one needs writable filesystem
+      runAsNonRoot: true
+      runAsUser: 1000
+
+    # Environment variables
+    env:
+      # Server Configuration
+      SERVER_HOST: "0.0.0.0"
+      SERVER_PORT: 8080
+
+      # Database Configuration (default SQLite)
+      DB_DRIVER: sqlite
+      DB_NAME: mailman.db
+
+      # Development mode
+      DEV_MODE: false
+
+      # Node.js environment for frontend
+      NODE_ENV: production
+
+    # Service configuration
+    service:
+      type: ClusterIP
+      ports:
+        http: 80       # Frontend port
+        api: 8080      # Backend port
+      annotations: {}
+
+    # Health check configuration
+    livenessProbe:
+      httpGet:
+        path: /
+        port: http
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+
+    readinessProbe:
+      httpGet:
+        path: /
+        port: http
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+
+    # Node selector, tolerations, affinity
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+# Ingress configuration
+ingress:
+  enabled: false
+
+  # Ingress class
+  className: ""
+
+  # Annotations
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+    # cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    # nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+
+  # Host configuration
+  hosts:
+    - host: mailman.local
+      paths:
+        - path: /
+          pathType: Prefix
+
+  # TLS configuration
+  tls: []
+    # - secretName: mailman-tls
+    #   hosts:
+    #     - mailman.local
+
+# ServiceAccount configuration
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Secret configuration
+secrets:
+  # OAuth2 configuration
+  oauth2:
+    existingSecret: ""
+    create: true
+    name: mailman-oauth2
+    keys:
+      gmailClientId: gmail-client-id
+      gmailClientSecret: gmail-client-secret
+      outlookClientId: outlook-client-id
+      outlookClientSecret: outlook-client-secret
+
+  # Application secrets
+  app:
+    existingSecret: ""
+    create: true
+    name: mailman-app
+    keys:
+      jwtSecret: jwt-secret
+      encryptionKey: encryption-key
+
+# ConfigMap configuration
+configMaps:
+  # Application configuration
+  app:
+    create: true
+    name: mailman-app-config
+    data:
+      # OAuth2 redirect URIs
+      GMAIL_REDIRECT_URI: "http://localhost/api/oauth2/callback/gmail"
+      OUTLOOK_REDIRECT_URI: "http://localhost/api/oauth2/callback/outlook"
+
+      # Frontend URL for OAuth2 callbacks
+      FRONTEND_URL: "http://localhost"
+
+      # OpenAI configuration (can be overridden)
+      OPENAI_BASE_URL: "https://api.openai.com/v1"
+      OPENAI_MODEL: "gpt-3.5-turbo"
+
+# Persistence configuration (for SQLite database and data)
+persistence:
+  # Data persistence (SQLite database + application data)
+  data:
+    enabled: true
+    storageClass: ""
+    size: 20Gi
+    accessModes:
+    - ReadWriteOnce
+
+  # Logs persistence
+  logs:
+    enabled: false
+    storageClass: ""
+    size: 5Gi
+    accessModes:
+    - ReadWriteOnce
+
+# Network policies
+networkPolicy:
+  enabled: false
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+# Monitoring configuration
+monitoring:
+  # Prometheus metrics
+  prometheus:
+    enabled: false
+    serviceMonitor:
+      enabled: false
+      interval: 30s
+      path: /metrics
+      port: http
+
+# Development/Testing configuration
+development:
+  enabled: false
+
+# External database configuration (optional)
+# If you want to use external MySQL instead of SQLite:
+# Set the following environment variables in mailman.allInOne.env:
+# - DB_DRIVER: mysql
+# - DB_HOST: your-mysql-host
+# - DB_PORT: 3306
+# - DB_USER: your-mysql-user
+# - DB_PASSWORD: your-mysql-password
+# - DB_NAME: mailman

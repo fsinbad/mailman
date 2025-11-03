@@ -1,0 +1,440 @@
+# Default values for mailman Helm chart
+# This is a YAML-formatted file
+
+# Global configuration
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  storageClass: ""
+
+# Mailman application configuration
+mailman:
+  # Backend configuration
+  backend:
+    # Image configuration
+    image:
+      registry: ghcr.io
+      repository: seongminhwan/mailman-backend
+      tag: "latest"
+      pullPolicy: IfNotPresent
+      pullSecrets: []
+
+    # Replica count
+    replicaCount: 1
+
+    # Resource limits and requests
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+      requests:
+        cpu: 500m
+        memory: 512Mi
+
+    # Horizontal Pod Autoscaler
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 80
+      targetMemoryUtilizationPercentage: 80
+
+    # Pod configuration
+    podAnnotations: {}
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      runAsUser: 1000
+
+    # Environment variables
+    env:
+      # Server Configuration
+      SERVER_HOST: "0.0.0.0"
+      SERVER_PORT: 8080
+
+      # Database Configuration (will be overridden by MySQL chart values)
+      DB_DRIVER: mysql
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: mailman
+      DB_NAME: mailman
+
+      # Development mode
+      DEV_MODE: false
+
+    # Service configuration
+    service:
+      type: ClusterIP
+      port: 8080
+      annotations: {}
+
+    # Health check configuration
+    livenessProbe:
+      httpGet:
+        path: /api/health
+        port: http
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+
+    readinessProbe:
+      httpGet:
+        path: /api/health
+        port: http
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+
+    # Node selector, tolerations, affinity
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+  # Frontend configuration
+  frontend:
+    # Image configuration
+    image:
+      registry: ghcr.io
+      repository: seongminhwan/mailman-frontend
+      tag: "latest"
+      pullPolicy: IfNotPresent
+      pullSecrets: []
+
+    # Replica count
+    replicaCount: 1
+
+    # Resource limits and requests
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 250m
+        memory: 256Mi
+
+    # Horizontal Pod Autoscaler
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 80
+      targetMemoryUtilizationPercentage: 80
+
+    # Pod configuration
+    podAnnotations: {}
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 101
+      runAsGroup: 101
+      fsGroup: 101
+
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      runAsUser: 101
+
+    # Environment variables
+    env:
+      NODE_ENV: production
+
+    # Service configuration
+    service:
+      type: ClusterIP
+      port: 80
+      annotations: {}
+
+    # Health check configuration
+    livenessProbe:
+      httpGet:
+        path: /
+        port: http
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+
+    readinessProbe:
+      httpGet:
+        path: /
+        port: http
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+
+    # Node selector, tolerations, affinity
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+# MySQL configuration using Bitnami MySQL chart
+mysql:
+  enabled: true
+
+  # Image configuration
+  image:
+    registry: docker.io
+    repository: bitnami/mysql
+    tag: 8.0.35-debian-11-r12
+    pullPolicy: IfNotPresent
+
+  # Authentication
+  auth:
+    rootPassword: ""  # Set in secrets
+    database: mailman
+    username: mailman
+    password: ""      # Set in secrets
+
+  # MySQL configuration
+  primary:
+    # Resource configuration
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+      requests:
+        cpu: 500m
+        memory: 1Gi
+
+    # Persistence configuration
+    persistence:
+      enabled: true
+      storageClass: ""
+      size: 20Gi
+      accessModes:
+      - ReadWriteOnce
+
+    # Configuration
+    configuration: |
+      [mysqld]
+      default_authentication_plugin=mysql_native_password
+      character-set-server=utf8mb4
+      collation-server=utf8mb4_unicode_ci
+      max_connections=200
+      innodb_buffer_pool_size=1G
+
+    # Service configuration (internal only, not exposed)
+    service:
+      type: ClusterIP
+      ports:
+        mysql: 3306
+
+  # Security configuration
+  securityContext:
+    enabled: true
+
+# Ingress configuration
+ingress:
+  enabled: false
+
+  # Ingress class
+  className: ""
+
+  # Annotations
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+    # cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    # nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+
+  # Host configuration
+  hosts:
+    - host: mailman.local
+      paths:
+        - path: /
+          pathType: Prefix
+
+  # TLS configuration
+  tls: []
+    # - secretName: mailman-tls
+    #   hosts:
+    #     - mailman.local
+
+# ServiceAccount configuration
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Secret configuration
+secrets:
+  # Database credentials
+  database:
+    existingSecret: ""
+    create: true
+    name: mailman-database
+    keys:
+      rootPassword: mysql-root-password
+      userPassword: mysql-password
+
+  # OAuth2 configuration
+  oauth2:
+    existingSecret: ""
+    create: true
+    name: mailman-oauth2
+    keys:
+      gmailClientId: gmail-client-id
+      gmailClientSecret: gmail-client-secret
+      outlookClientId: outlook-client-id
+      outlookClientSecret: outlook-client-secret
+
+  # Application secrets
+  app:
+    existingSecret: ""
+    create: true
+    name: mailman-app
+    keys:
+      jwtSecret: jwt-secret
+      encryptionKey: encryption-key
+
+# ConfigMap configuration
+configMaps:
+  # Application configuration
+  app:
+    create: true
+    name: mailman-app-config
+    data:
+      # OAuth2 redirect URIs
+      GMAIL_REDIRECT_URI: "http://localhost/api/oauth2/callback/gmail"
+      OUTLOOK_REDIRECT_URI: "http://localhost/api/oauth2/callback/outlook"
+
+      # Frontend URL for OAuth2 callbacks
+      FRONTEND_URL: "http://localhost"
+
+      # OpenAI configuration (can be overridden)
+      OPENAI_BASE_URL: "https://api.openai.com/v1"
+      OPENAI_MODEL: "gpt-3.5-turbo"
+
+# Persistence configuration
+persistence:
+  # Data persistence
+  data:
+    enabled: true
+    storageClass: ""
+    size: 10Gi
+    accessModes:
+    - ReadWriteOnce
+
+  # Logs persistence
+  logs:
+    enabled: false
+    storageClass: ""
+    size: 5Gi
+    accessModes:
+    - ReadWriteOnce
+
+# Network policies
+networkPolicy:
+  enabled: false
+  ingress:
+    - from:
+      - namespaceSelector:
+          matchLabels:
+            name: ingress-nginx
+      ports:
+      - protocol: TCP
+        port: 80
+  egress:
+    - to: []
+      ports:
+      - protocol: TCP
+        port: 53
+      - protocol: UDP
+        port: 53
+    - to:
+      - podSelector:
+          matchLabels:
+            app.kubernetes.io/name: mysql
+      ports:
+      - protocol: TCP
+        port: 3306
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  # maxUnavailable: 1
+
+# RBAC configuration
+rbac:
+  create: true
+
+# Monitoring configuration
+monitoring:
+  # Prometheus metrics
+  prometheus:
+    enabled: false
+    serviceMonitor:
+      enabled: false
+      interval: 30s
+      path: /metrics
+      port: http
+
+  # Grafana dashboard
+  grafana:
+    enabled: false
+    dashboard:
+      enabled: false
+
+# Backup configuration
+backup:
+  enabled: false
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  retention: 7  # Keep 7 days of backups
+  storageClass: ""
+  storageSize: 10Gi
+
+# Development/Testing configuration
+development:
+  enabled: false
+
+  # Development overrides
+  mailman:
+    backend:
+      replicaCount: 1
+      resources:
+        limits:
+          cpu: 500m
+          memory: 512Mi
+        requests:
+          cpu: 250m
+          memory: 256Mi
+    frontend:
+      replicaCount: 1
+      resources:
+        limits:
+          cpu: 250m
+          memory: 256Mi
+        requests:
+          cpu: 125m
+          memory: 128Mi
+
+  # Development database
+  mysql:
+    primary:
+      resources:
+        limits:
+          cpu: 500m
+          memory: 1Gi
+        requests:
+          cpu: 250m
+          memory: 512Mi
+      persistence:
+        size: 10Gi

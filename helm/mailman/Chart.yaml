@@ -1,0 +1,32 @@
+apiVersion: v2
+name: mailman
+description: A Helm chart for Mailman - Email management and OAuth2 authentication system
+type: application
+version: 0.1.0
+appVersion: "latest"
+
+keywords:
+  - email
+  - oauth2
+  - mail
+  - management
+  - gmail
+  - outlook
+
+home: https://github.com/your-org/mailman
+sources:
+  - https://github.com/your-org/mailman
+
+maintainers:
+  - name: Mailman Team
+    email: team@example.com
+
+dependencies:
+  - name: mysql
+    version: 9.x.x
+    repository: https://charts.bitnami.com/bitnami
+    condition: mysql.enabled
+
+annotations:
+  category: Infrastructure
+  licenses: MIT

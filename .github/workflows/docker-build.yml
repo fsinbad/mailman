@@ -1,4 +1,4 @@
-name: Build and Push Docker Images
+name: Build and Push Multi-Architecture Docker Images
 
 on:
   push:
@@ -38,8 +38,15 @@ jobs:
             type=ref,event=tag
             type=raw,value=latest,enable={{is_default_branch}}
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
 
       - name: Build and push backend image
         id: build
@@ -47,6 +54,7 @@ jobs:
         with:
           context: ./backend
           file: ./backend/Dockerfile
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -80,8 +88,15 @@ jobs:
             type=ref,event=tag
             type=raw,value=latest,enable={{is_default_branch}}
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
 
       - name: Build and push frontend image
         id: build
@@ -89,6 +104,7 @@ jobs:
         with:
           context: ./frontend
           file: ./frontend/Dockerfile.nginx
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -100,6 +116,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      all-in-one-digest: ${{ steps.build.outputs.digest }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -120,14 +138,23 @@ jobs:
             type=ref,event=tag
             type=raw,value=latest,enable={{is_default_branch}}
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
 
       - name: Build and push all-in-one image
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile.all
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -152,11 +179,25 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
           body: |
-            ## Docker Images
+            ## 🐳 Multi-Architecture Docker Images
+
+            This release includes support for multiple architectures:
+
+            ✅ **linux/amd64** - Intel/AMD 64-bit (Desktops, Servers)
+            ✅ **linux/arm64** - ARM 64-bit (Apple Silicon, ARM Servers)
+            ✅ **linux/arm/v7** - ARM 32-bit (Raspberry Pi, ARM Devices)
+
+            ## 📦 Available Images
 
             ### Backend
             ```bash
+            # Pull the multi-architecture image
             docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.ref_name }}
+
+            # Or pull specific architecture
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.ref_name }} --platform linux/amd64
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.ref_name }} --platform linux/arm64
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.ref_name }} --platform linux/arm/v7
             ```
 
             ### Frontend
@@ -164,35 +205,86 @@ jobs:
             docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ github.ref_name }}
             ```
 
-            ### All-in-One
+            ### All-in-One (Recommended)
             ```bash
             docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }}
             ```
 
-            ## Quick Start with All-in-One Image
-            
+            ## 🚀 Quick Start with All-in-One Image
+
             ### Using SQLite (Default)
             ```bash
             docker run -d \
               --name mailman \
-              -p 80:80 \
-              -p 8080:8080 \
-              -v mailman_data:/app \
+              -p 8080:80 \
+              -v mailman_data:/app/data \
+              --restart unless-stopped \
               ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }}
             ```
-            
+
             ### Using MySQL
             ```bash
             docker run -d \
               --name mailman \
-              -p 80:80 \
-              -p 8080:8080 \
+              -p 8080:80 \
+              -v mailman_data:/app/data \
               -e DB_DRIVER=mysql \
               -e DB_HOST=your_mysql_host \
               -e DB_USER=your_mysql_user \
               -e DB_PASSWORD=your_mysql_password \
               -e DB_NAME=mailman \
+              --restart unless-stopped \
               ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }}
             ```
+
+            ## 🏗️ Platform-Specific Deployments
+
+            ### Apple Silicon (M1/M2/M3) Mac
+            ```bash
+            # Docker will automatically pull the arm64 image
+            docker run -d \
+              --name mailman \
+              -p 8080:80 \
+              -v mailman_data:/app/data \
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }}
+            ```
+
+            ### Raspberry Pi (ARM32)
+            ```bash
+            # Explicitly specify ARM32 platform
+            docker run -d \
+              --name mailman \
+              -p 8080:80 \
+              -v mailman_data:/app/data \
+              --platform linux/arm/v7 \
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }}
+            ```
+
+            ### Regular PC/Server (Intel/AMD)
+            ```bash
+            # Docker will automatically pull the amd64 image
+            docker run -d \
+              --name mailman \
+              -p 8080:80 \
+              -v mailman_data:/app/data \
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }}
+            ```
+
+            ## 🌐 Access the Application
+
+            After deployment:
+            - **Frontend**: http://localhost:8080
+            - **Default Login**: admin / admin123
+            - **API Docs**: http://localhost:8080/swagger/index.html
+
+            ## 🔧 Architecture Information
+
+            Docker automatically selects the appropriate architecture for your platform. You can verify the pulled architecture with:
+
+            ```bash
+            docker inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }} | grep Architecture
+            ```
+
+            For more information about multi-architecture support, see the [documentation](https://docs.docker.com/buildx/working-with-buildx/#build-multi-platform-images).
           draft: false
           prerelease: false

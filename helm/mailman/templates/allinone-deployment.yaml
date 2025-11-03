@@ -1,0 +1,151 @@
+{{- if .Values.mailman.allInOne.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mailman.fullname" . }}-allinone
+  labels:
+    {{- include "mailman.labels" . | nindent 4 }}
+    app.kubernetes.io/component: allinone
+spec:
+  {{- if not .Values.mailman.allInOne.autoscaling.enabled }}
+  replicas: {{ .Values.mailman.allInOne.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "mailman.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: allinone
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
+        {{- with .Values.mailman.allInOne.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "mailman.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: allinone
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "mailman.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.mailman.allInOne.podSecurityContext | nindent 8 }}
+      containers:
+        - name: allinone
+          securityContext:
+            {{- toYaml .Values.mailman.allInOne.securityContext | nindent 12 }}
+          image: "{{ .Values.mailman.allInOne.image.registry }}/{{ .Values.mailman.allInOne.image.repository }}:{{ .Values.mailman.allInOne.image.tag }}"
+          imagePullPolicy: {{ .Values.mailman.allInOne.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+            - name: api
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            {{- toYaml .Values.mailman.allInOne.livenessProbe | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            {{- toYaml .Values.mailman.allInOne.readinessProbe | nindent 12 }}
+          env:
+            {{- if .Values.secrets.oauth2.create }}
+            - name: GMAIL_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.oauth2.name }}
+                  key: {{ .Values.secrets.oauth2.keys.gmailClientId }}
+            - name: GMAIL_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.oauth2.name }}
+                  key: {{ .Values.secrets.oauth2.keys.gmailClientSecret }}
+            - name: OUTLOOK_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.oauth2.name }}
+                  key: {{ .Values.secrets.oauth2.keys.outlookClientId }}
+            - name: OUTLOOK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.oauth2.name }}
+                  key: {{ .Values.secrets.oauth2.keys.outlookClientSecret }}
+            {{- end }}
+            {{- if .Values.configMaps.app.create }}
+            - name: GMAIL_REDIRECT_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ .Values.configMaps.app.name }}
+                  key: GMAIL_REDIRECT_URI
+            - name: OUTLOOK_REDIRECT_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ .Values.configMaps.app.name }}
+                  key: OUTLOOK_REDIRECT_URI
+            - name: FRONTEND_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ .Values.configMaps.app.name }}
+                  key: FRONTEND_URL
+            - name: OPENAI_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ .Values.configMaps.app.name }}
+                  key: OPENAI_BASE_URL
+            - name: OPENAI_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ .Values.configMaps.app.name }}
+                  key: OPENAI_MODEL
+            {{- end }}
+            {{- range $key, $val := .Values.mailman.allInOne.env }}
+            - name: {{ $key }}
+              value: {{ $val | quote }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.mailman.allInOne.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.persistence.data.enabled }}
+            - name: data
+              mountPath: /app
+            {{- end }}
+            {{- if .Values.persistence.logs.enabled }}
+            - name: logs
+              mountPath: /app/logs
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.persistence.data.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "mailman.fullname" . }}-data
+        {{- end }}
+        {{- if .Values.persistence.logs.enabled }}
+        - name: logs
+          persistentVolumeClaim:
+            claimName: {{ include "mailman.fullname" . }}-logs
+        {{- end }}
+      {{- with .Values.mailman.allInOne.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.mailman.allInOne.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.mailman.allInOne.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

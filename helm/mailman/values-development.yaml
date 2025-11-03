@@ -1,0 +1,150 @@
+# Development values for mailman Helm chart
+# Override default values with development-specific settings
+
+# Global configuration
+global:
+  imageRegistry: ""
+
+# Mailman application configuration
+mailman:
+  backend:
+    replicaCount: 1
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 250m
+        memory: 256Mi
+
+    env:
+      # Development server configuration
+      SERVER_HOST: "0.0.0.0"
+      SERVER_PORT: 8080
+
+      # Development mode
+      DEV_MODE: true
+
+    # Disable autoscaling in development
+    autoscaling:
+      enabled: false
+
+  frontend:
+    replicaCount: 1
+    resources:
+      limits:
+        cpu: 250m
+        memory: 256Mi
+      requests:
+        cpu: 125m
+        memory: 128Mi
+
+    env:
+      NODE_ENV: development
+
+    # Disable autoscaling in development
+    autoscaling:
+      enabled: false
+
+# MySQL development configuration
+mysql:
+  enabled: true
+
+  auth:
+    rootPassword: "devroot123"
+    database: mailman_dev
+    username: mailman
+    password: "devmailman123"
+
+  primary:
+    resources:
+      limits:
+        cpu: 500m
+        memory: 1Gi
+      requests:
+        cpu: 250m
+        memory: 512Mi
+
+    persistence:
+      enabled: true
+      storageClass: ""
+      size: 10Gi
+      accessModes:
+      - ReadWriteOnce
+
+    configuration: |
+      [mysqld]
+      default_authentication_plugin=mysql_native_password
+      character-set-server=utf8mb4
+      collation-server=utf8mb4_unicode_ci
+      max_connections=50
+      innodb_buffer_pool_size=512M
+
+# Ingress configuration (disabled for development)
+ingress:
+  enabled: false
+
+# Secret configuration
+secrets:
+  database:
+    existingSecret: ""
+    create: true
+    name: mailman-database-dev
+
+  oauth2:
+    existingSecret: ""
+    create: true
+    name: mailman-oauth2-dev
+
+  app:
+    existingSecret: ""
+    create: true
+    name: mailman-app-dev
+
+# ConfigMap configuration
+configMaps:
+  app:
+    create: true
+    name: mailman-app-config-dev
+    data:
+      # Development OAuth2 redirect URIs
+      GMAIL_REDIRECT_URI: "http://localhost:8080/api/oauth2/callback/gmail"
+      OUTLOOK_REDIRECT_URI: "http://localhost:8080/api/oauth2/callback/outlook"
+      FRONTEND_URL: "http://localhost:3000"
+      OPENAI_BASE_URL: "https://api.openai.com/v1"
+      OPENAI_MODEL: "gpt-3.5-turbo"
+
+# Persistence configuration (smaller for development)
+persistence:
+  data:
+    enabled: false
+
+  logs:
+    enabled: false
+
+# Network policies (disabled for development)
+networkPolicy:
+  enabled: false
+
+# Pod disruption budget (disabled for development)
+podDisruptionBudget:
+  enabled: false
+
+# Monitoring configuration (disabled for development)
+monitoring:
+  prometheus:
+    enabled: false
+    serviceMonitor:
+      enabled: false
+
+  grafana:
+    enabled: false
+
+# Backup configuration (disabled for development)
+backup:
+  enabled: false
+
+# ServiceAccount
+serviceAccount:
+  create: true
+  annotations: {}
