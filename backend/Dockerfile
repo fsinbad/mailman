@@ -2,7 +2,7 @@
 FROM golang:1.23-alpine AS builder
 
 # Install build dependencies
-RUN apk add --no-cache git gcc musl-dev
+RUN apk add --no-cache git gcc musl-dev make binutils-gold build-base
 
 # Set working directory
 WORKDIR /app
@@ -19,8 +19,8 @@ COPY . .
 # Tidy go modules
 RUN go mod tidy
 
-# Build the application
-RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o mailman ./cmd/mailman
+# Build the application (try without CGO first for better compatibility)
+RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags '-w -extldflags "-static"' -o mailman ./cmd/mailman
 
 # Final stage
 FROM alpine:latest
