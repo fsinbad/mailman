@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { Select, SelectItem } from '@/components/ui/select'
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import {
   Search,
   Filter,
@@ -156,9 +156,14 @@ export function TriggerList({ onEdit, onView, onDelete, onStatusChange, onDebug 
             </div>
             <div className="flex gap-2">
               <Select value={statusFilter} onValueChange={handleStatusFilter}>
-                <SelectItem value="all">所有状态</SelectItem>
-                <SelectItem value="enabled">运行中</SelectItem>
-                <SelectItem value="disabled">已停用</SelectItem>
+                <SelectTrigger>
+                  {statusFilter === 'all' ? '所有状态' : statusFilter === 'enabled' ? '运行中' : '已停用'}
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">所有状态</SelectItem>
+                  <SelectItem value="enabled">运行中</SelectItem>
+                  <SelectItem value="disabled">已停用</SelectItem>
+                </SelectContent>
               </Select>
             </div>
           </div>
