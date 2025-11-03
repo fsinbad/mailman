@@ -107,7 +107,7 @@ export default function DiagnosticsPage() {
         <ErrorDiagnostics 
           triggerId={triggerId ? parseInt(triggerId) : undefined}
           logId={logId ? parseInt(logId) : undefined}
-          error={errorParam || log?.error || undefined}
+          error={errorParam || log?.error_message || undefined}
         />
       )}
     </div>
