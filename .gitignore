@@ -59,6 +59,12 @@ yarn-error.log*
 *.db
 *.sqlite
 *.sqlite3
+*.db.backup
+*.db.broken
+*.db-*
+mailman.db.*
+backend/mailman.db.*
+frontend/mailman.db.*
 
 # Coverage reports
 coverage/
