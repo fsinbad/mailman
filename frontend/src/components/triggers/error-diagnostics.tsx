@@ -71,9 +71,9 @@ export function ErrorDiagnostics({ triggerId, logId, error, onClose }: ErrorDiag
       const log = await triggerService.getTriggerLog(id)
       setErrorLog(log)
       
-      if (log.error) {
-        setErrorText(log.error)
-        analyzeError(log.error)
+      if (log.error_message) {
+        setErrorText(log.error_message)
+        analyzeError(log.error_message)
       }
     } catch (err) {
       console.error('加载错误日志失败:', err)
