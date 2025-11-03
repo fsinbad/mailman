@@ -7,10 +7,10 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Plus, X, ChevronDown, ChevronUp, ArrowDown, ArrowUp } from 'lucide-react'
 import { OptimizedConditionItem } from './optimized-condition-item'
-import { Expression } from './condition-group'
+import { Expression, OperatorType, LogicalOperatorType } from './condition-group'
 
-// 操作符类型
-export type OperatorType = 'and' | 'or' | 'not'
+// 保持向后兼容的别名
+type LocalOperatorType = LogicalOperatorType
 
 interface ConditionGroupProps {
   group: Expression
@@ -101,7 +101,7 @@ export const OptimizedConditionGroup = memo(function ConditionGroup({
   }, [group.conditions])
   
   // 根据操作符获取描述文本 - 使用useCallback优化
-  const getOperatorDescription = useCallback((operator?: OperatorType, not?: boolean) => {
+  const getOperatorDescription = useCallback((operator?: LocalOperatorType, not?: boolean) => {
     if (not) {
       return '不满足以下条件'
     }
@@ -235,7 +235,7 @@ export const OptimizedConditionGroup = memo(function ConditionGroup({
     
     return (
       <div className="mt-2 text-sm text-gray-500">
-        {group.conditions?.length || 0} 个条件 - {getOperatorDescription(group.operator, group.not)}
+        {group.conditions?.length || 0} 个条件 - {getOperatorDescription(group.operator as LocalOperatorType, group.not)}
       </div>
     );
   }, [collapsed, group.conditions?.length, group.operator, group.not, getOperatorDescription]);

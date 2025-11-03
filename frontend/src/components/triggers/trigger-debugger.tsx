@@ -64,7 +64,7 @@ export function TriggerDebugger({ trigger, onSave }: TriggerDebuggerProps) {
       }
       
       // 执行条件测试
-      const result = await triggerService.testTriggerCondition(trigger.expressions, parsedData)
+      const result = await triggerService.testTriggerCondition(trigger.condition, parsedData)
       
       // 设置测试结果
       setConditionResult(result)
