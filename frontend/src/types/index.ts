@@ -221,6 +221,7 @@ export interface PaginationParams {
     sort_by?: string;
     sort_order?: 'asc' | 'desc';
     search?: string;  // 添加搜索字段，用于邮箱地址模糊查询
+    status?: string;  // 添加状态字段，用于状态过滤
 }
 
 export interface PaginatedResponse<T> {
