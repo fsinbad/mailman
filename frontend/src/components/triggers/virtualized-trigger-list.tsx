@@ -20,8 +20,9 @@ import {
 } from 'lucide-react'
 import { triggerService } from '@/services/trigger.service'
 import { EmailTrigger, PaginationParams } from '@/types'
-import { FixedSizeList as List } from 'react-window'
-import AutoSizer from 'react-virtualized-auto-sizer'
+// TODO: Install react-window and react-virtualized-auto-sizer packages
+// import { FixedSizeList as List } from 'react-window'
+// import AutoSizer from 'react-virtualized-auto-sizer'
 
 export interface VirtualizedTriggerListProps {
   onEdit?: (trigger: EmailTrigger) => void

@@ -132,8 +132,8 @@ export function TriggerList({ onEdit, onView, onDelete, onStatusChange, onDebug 
   }
 
   // 处理状态过滤
-  const handleStatusFilter = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setStatusFilter(e.target.value)
+  const handleStatusFilter = (value: string) => {
+    setStatusFilter(value)
     setPage(1) // 重置到第一页
   }
 
