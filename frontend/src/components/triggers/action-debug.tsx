@@ -144,18 +144,21 @@ export function ActionDebug({ action }: ActionDebugProps) {
       
       // 记录开始时间
       const startTime = performance.now()
-      
+
       // 调用API测试动作
       const response = await actionTestService.testAction(action, emailData)
-      
+
+      // 计算执行时间
+      const executionTimeMs = performance.now() - startTime
+
       setResult(response.result)
       setSuccess(response.success)
       setExecutionTime(response.executionTime || null)
-      
+
       if (response.error) {
         setError(response.error)
       }
-      
+
       // 添加到测试历史
       setTestHistory(prev => [
         {
