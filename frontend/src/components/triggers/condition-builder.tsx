@@ -194,7 +194,7 @@ export function ConditionBuilder({ initialExpressions, onChange, onTest }: Condi
           body: "这是一封测试邮件"
         }
         
-        const result = await onTest(expressions, defaultTestData)
+        const result = await onTest(expressions)
         // 处理测试结果
         console.log('测试结果:', result)
         

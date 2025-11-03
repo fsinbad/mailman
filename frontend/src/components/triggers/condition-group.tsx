@@ -16,7 +16,7 @@ export type ExpressionType = 'group' | 'condition'
 export type LogicalOperatorType = 'and' | 'or' | 'not'
 
 // 比较操作符类型
-export type ComparisonOperatorType = 'equals' | 'not_equals' | 'contains' | 'not_contains' | 'starts_with' | 'ends_with' | 'greater_than' | 'less_than' | 'greater_equal' | 'less_equal' | 'regex' | 'not_regex'
+export type ComparisonOperatorType = 'equals' | 'not_equals' | 'contains' | 'not_contains' | 'starts_with' | 'ends_with' | 'matches' | 'greater_than' | 'less_than' | 'greater_equal' | 'less_equal' | 'in' | 'not_in' | 'regex' | 'not_regex'
 
 // 操作符类型（联合类型）
 export type OperatorType = LogicalOperatorType | ComparisonOperatorType
