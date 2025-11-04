@@ -184,15 +184,19 @@ export default function OutlookThunderbirdModal({
         }
 
         // 触发Outlook已有Token模态框，预填充Thunderbird获取的数据
+        const eventData = {
+            email: stepData.authData.email,
+            clientId: THUNDERBIRD_CONFIG.clientId,
+            accessToken: stepData.authData.accessToken,
+            refreshToken: stepData.authData.refreshToken,
+            // 标记为Thunderbird来源，不需要输入token
+            fromThunderbird: true
+        }
+
+        console.log('[Thunderbird Modal] 触发triggerOutlookTokenModal事件，数据:', eventData)
+
         const event = new CustomEvent('triggerOutlookTokenModal', {
-            detail: {
-                email: stepData.authData.email,
-                clientId: THUNDERBIRD_CONFIG.clientId,
-                accessToken: stepData.authData.accessToken,
-                refreshToken: stepData.authData.refreshToken,
-                // 标记为Thunderbird来源，不需要输入token
-                fromThunderbird: true
-            }
+            detail: eventData
         })
         window.dispatchEvent(event)
 

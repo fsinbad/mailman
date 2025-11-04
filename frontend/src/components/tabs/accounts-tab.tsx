@@ -168,7 +168,8 @@ export default function AccountsTab() {
 
     // 监听来自Thunderbird模态框的事件，打开Outlook Token模态框
     useEffect(() => {
-        const handleTriggerOutlookTokenModal = () => {
+        const handleTriggerOutlookTokenModal = (event: any) => {
+            console.log('[Accounts Tab] 收到triggerOutlookTokenModal事件，数据:', event.detail)
             setShowOutlookTokenModal(true)
         }
 

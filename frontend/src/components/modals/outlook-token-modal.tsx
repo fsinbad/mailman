@@ -86,40 +86,60 @@ export default function OutlookTokenModal({
     useEffect(() => {
         const handleThunderbirdData = (event: any) => {
             const detail = event.detail
+            console.log('[Outlook Token Modal] 收到triggerOutlookTokenModal事件，数据:', detail)
             if (detail) {
+                console.log('[Outlook Token Modal] 开始填充表单数据')
                 // 预填充Token表单数据
-                setTokenForm(prev => ({
-                    ...prev,
-                    email: detail.email || '',
-                    clientId: detail.clientId || '',
-                    accessToken: detail.accessToken || '',
-                    refreshToken: detail.refreshToken || ''
-                }))
+                setTokenForm(prev => {
+                    const newForm = {
+                        ...prev,
+                        email: detail.email || '',
+                        clientId: detail.clientId || '',
+                        accessToken: detail.accessToken || '',
+                        refreshToken: detail.refreshToken || ''
+                    }
+                    console.log('[Outlook Token Modal] 新的表单数据:', newForm)
+                    return newForm
+                })
 
                 // 如果来自Thunderbird，直接跳到验证步骤
                 if (detail.fromThunderbird) {
+                    console.log('[Outlook Token Modal] 来自Thunderbird，准备跳转到verify步骤')
                     // 延迟设置step，确保表单数据已更新
                     setTimeout(() => {
+                        console.log('[Outlook Token Modal] 跳转到verify步骤')
                         setCurrentStep('verify')
-                    }, 0)
+                    }, 100)
                 }
             }
         }
 
+        console.log('[Outlook Token Modal] 注册triggerOutlookTokenModal事件监听')
         window.addEventListener('triggerOutlookTokenModal', handleThunderbirdData)
         return () => {
+            console.log('[Outlook Token Modal] 移除triggerOutlookTokenModal事件监听')
             window.removeEventListener('triggerOutlookTokenModal', handleThunderbirdData)
         }
     }, [])
 
     // 仅在modal关闭时重置表单，而非打开时
     useEffect(() => {
+        console.log('[Outlook Token Modal] isOpen状态变化:', isOpen)
         if (!isOpen) {
+            console.log('[Outlook Token Modal] Modal关闭，重置表单')
             resetForm()
+        } else {
+            console.log('[Outlook Token Modal] Modal打开')
         }
     }, [isOpen])
 
+    // 监听tokenForm变化
+    useEffect(() => {
+        console.log('[Outlook Token Modal] tokenForm状态更新:', tokenForm)
+    }, [tokenForm])
+
     const resetForm = () => {
+        console.log('[Outlook Token Modal] 重置表单所有状态')
         setCurrentStep('token')
         setStepData({})
         setTokenForm({
