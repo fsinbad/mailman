@@ -452,31 +452,27 @@ jobs:
 
       - name: Create backend manifest
         run: |
-          # 创建主标签 manifest
+          # 创建主标签 manifest (使用正确的标签格式)
           docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.ref_name }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.ref_name }}-amd64
-
-          # 添加 ARM64 支持 (如果构建成功)
-          docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.ref_name }}-multi \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.ref_name }}-amd64 || true
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:amd64-latest
 
           # 推送主 manifest
           docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.ref_name }}
 
       - name: Create frontend manifest
         run: |
-          # 创建主标签 manifest
+          # 创建主标签 manifest (使用正确的标签格式)
           docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ github.ref_name }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ github.ref_name }}-amd64
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:amd64-latest
 
           # 推送主 manifest
           docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ github.ref_name }}
 
       - name: Create all-in-one manifest
         run: |
-          # 创建主标签 manifest
+          # 创建主标签 manifest (使用���确的标签格式)
           docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }}-amd64
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:amd64-latest
 
           # 推送主 manifest
           docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }}
@@ -501,41 +497,41 @@ jobs:
         run: |
           echo "Creating complete multi-architecture manifests..."
 
-          # Backend - 添加所有成功的架构
+          # Backend - 添加所有成功的架构 (使用正确的标签格式)
           docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.ref_name }}-complete \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.ref_name }}-amd64
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:amd64-latest
 
           # 尝试添加 ARM64
           docker manifest add ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.ref_name }}-complete \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.ref_name }}-arm64 || echo "ARM64 backend not available"
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:arm64-latest || echo "ARM64 backend not available"
 
           # 尝试添加 ARMv7
           docker manifest add ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.ref_name }}-complete \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.ref_name }}-armv7 || echo "ARMv7 backend not available"
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:armv7-latest || echo "ARMv7 backend not available"
 
           docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.ref_name }}-complete || echo "Failed to push complete backend manifest"
 
-          # Frontend - 添加所有成功的架构
+          # Frontend - 添加所有成功的架构 (使用正确的标签格式)
           docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ github.ref_name }}-complete \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ github.ref_name }}-amd64
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:amd64-latest
 
           docker manifest add ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ github.ref_name }}-complete \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ github.ref_name }}-arm64 || echo "ARM64 frontend not available"
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:arm64-latest || echo "ARM64 frontend not available"
 
           docker manifest add ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ github.ref_name }}-complete \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ github.ref_name }}-armv7 || echo "ARMv7 frontend not available"
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:armv7-latest || echo "ARMv7 frontend not available"
 
           docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ github.ref_name }}-complete || echo "Failed to push complete frontend manifest"
 
-          # All-in-one - 添加所有成功的架构
+          # All-in-one - 添加所有成功的架构 (使用正确的标签格式)
           docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }}-complete \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }}-amd64
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:amd64-latest
 
           docker manifest add ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }}-complete \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }}-arm64 || echo "ARM64 all-in-one not available"
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:arm64-latest || echo "ARM64 all-in-one not available"
 
           docker manifest add ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }}-complete \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }}-armv7 || echo "ARMv7 all-in-one not available"
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:armv7-latest || echo "ARMv7 all-in-one not available"
 
           docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }}-complete || echo "Failed to push complete all-in-one manifest"
 
