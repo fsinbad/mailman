@@ -82,12 +82,6 @@ export default function OutlookTokenModal({
 
     const currentStepIndex = steps.findIndex(step => step.key === currentStep)
 
-    useEffect(() => {
-        if (isOpen) {
-            resetForm()
-        }
-    }, [isOpen])
-
     // 监听来自Thunderbird的授权完成事件
     useEffect(() => {
         const handleThunderbirdData = (event: any) => {
@@ -104,7 +98,10 @@ export default function OutlookTokenModal({
 
                 // 如果来自Thunderbird，直接跳到验证步骤
                 if (detail.fromThunderbird) {
-                    setCurrentStep('verify')
+                    // 延迟设置step，确保表单数据已更新
+                    setTimeout(() => {
+                        setCurrentStep('verify')
+                    }, 0)
                 }
             }
         }
@@ -114,6 +111,13 @@ export default function OutlookTokenModal({
             window.removeEventListener('triggerOutlookTokenModal', handleThunderbirdData)
         }
     }, [])
+
+    // 仅在modal关闭时重置表单，而非打开时
+    useEffect(() => {
+        if (!isOpen) {
+            resetForm()
+        }
+    }, [isOpen])
 
     const resetForm = () => {
         setCurrentStep('token')
