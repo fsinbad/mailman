@@ -563,7 +563,10 @@ func (s *OAuth2Service) ExchangeCodeForTokens(providerType, clientID, clientSecr
 
 	data := url.Values{}
 	data.Set("client_id", clientID)
-	data.Set("client_secret", clientSecret)
+	// Only include client_secret for confidential clients (not public clients)
+	if clientSecret != "" {
+		data.Set("client_secret", clientSecret)
+	}
 	data.Set("code", code)
 	data.Set("grant_type", "authorization_code")
 	data.Set("redirect_uri", redirectURI)

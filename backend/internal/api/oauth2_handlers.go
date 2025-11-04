@@ -701,17 +701,18 @@ func (h *OAuth2Handler) ExchangeThunderbirdToken(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Thunderbird固定配置
+	// Thunderbird固定配置（使用Outlook提供商配置，因为Thunderbird使用相同的Microsoft OAuth2端点）
 	clientId := "9e5f94bc-e8a4-4e73-b8be-63364c29d753"
+	redirectUri := "https://localhost"
 	scope := "offline_access https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/POP.AccessAsUser.All https://outlook.office.com/EWS.AccessAsUser.All https://outlook.office.com/SMTP.Send"
 
-	// 使用OAuth2服务来获取token
-	accessToken, refreshToken, err := h.oauth2Service.RefreshAccessTokenForProviderWithProxy(
-		"thunderbird",
+	// 使用OAuth2服务来交换授权码获取token
+	accessToken, refreshToken, err := h.oauth2Service.ExchangeCodeForTokens(
+		"outlook", // Thunderbird使用与Outlook相同的Microsoft OAuth2端点
 		clientId,
 		"", // Thunderbird是公开客户端，无需secret
 		request.Code,
-		"", // 没有代理
+		redirectUri,
 	)
 
 	if err != nil {
