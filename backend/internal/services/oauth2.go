@@ -1,6 +1,7 @@
 package services
 
 import (
+	"crypto/sha1"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -124,8 +125,58 @@ func (s *OAuth2Service) getAccountLock(accountKey string) *sync.Mutex {
 
 // getCacheKey 生成缓存键
 func (s *OAuth2Service) getCacheKey(providerType, clientID, refreshToken string) string {
-	// 简化缓存键生成，避免MD5依赖
-	return fmt.Sprintf("%s_%s_%s", providerType, clientID, refreshToken[:10])
+	// 使用SHA1 hash生成唯一缓存键，避免冲突
+	// 组合所有关键信息确保唯一性
+	data := fmt.Sprintf("%s_%s_%s", providerType, clientID, refreshToken)
+	hash := sha1.Sum([]byte(data))
+	// 使用base64编码hash，生成安全的缓存键
+	cacheKey := base64.URLEncoding.EncodeToString(hash[:])
+
+	// 添加provider前缀便于调试
+	return fmt.Sprintf("%s_%s", providerType, cacheKey[:16])
+}
+
+// cleanupOldCacheEntries 清理可能存在的旧缓存条目
+func (s *OAuth2Service) cleanupOldCacheEntries(providerType, clientID, newRefreshToken string) {
+	s.cacheMutex.Lock()
+	defer s.cacheMutex.Unlock()
+
+	// 查找所有相关的缓存条目
+	var keysToDelete []string
+	for key, entry := range s.tokenCache {
+		// 如果是同一个provider和clientID但refresh token不同，则删除
+		if strings.HasPrefix(key, providerType+"_") {
+			// 这是一个同provider的缓存条目，需要检查是否是旧的
+			// 由于我们无法从缓存key中反推出原始信息，我们使用启发式方法：
+			// 如果这个条目的refresh时间超过1小时，可能是旧的
+			if time.Since(entry.RefreshTime) > time.Hour {
+				keysToDelete = append(keysToDelete, key)
+			}
+		}
+	}
+
+	// 删除过期的缓存条目
+	for _, key := range keysToDelete {
+		delete(s.tokenCache, key)
+		fmt.Printf("OAuth2: Cleaned up old cache entry: %s\n", key)
+	}
+
+	if len(keysToDelete) > 0 {
+		fmt.Printf("OAuth2: Cleaned up %d old cache entries for provider %s\n", len(keysToDelete), providerType)
+	}
+}
+
+// getMapKeys 辅助函数，用于获取map的所有键
+func getMapKeys(m models.JSONMap) []string {
+	if m == nil {
+		return []string{}
+	}
+
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // RefreshAccessTokenWithCache 带缓存和并发控制的token刷新
@@ -189,26 +240,64 @@ func (s *OAuth2Service) RefreshAccessTokenWithCacheAndProxy(providerType, client
 	if newRefreshToken != "" && s.db != nil {
 		fmt.Printf("OAuth2: Updating refresh token for account %d (new token length: %d)\n", accountID, len(newRefreshToken))
 
-		// 更新数据库中的refresh token
-		result := s.db.Model(&models.EmailAccount{}).
-			Where("id = ?", accountID).
-			Update("token", newRefreshToken)
-
-		if result.Error != nil {
-			fmt.Printf("OAuth2: Failed to update refresh token in database for account %d: %v\n", accountID, result.Error)
+		// 正确更新CustomSettings中的refresh_token字段
+		// 先获取当前的CustomSettings
+		var account models.EmailAccount
+		if err := s.db.Where("id = ?", accountID).First(&account).Error; err != nil {
+			fmt.Printf("OAuth2: Failed to fetch account for refresh token update %d: %v\n", accountID, err)
 		} else {
-			fmt.Printf("OAuth2: Successfully updated refresh token in database for account %d\n", accountID)
+			fmt.Printf("OAuth2: Retrieved account %d, current CustomSettings keys: %v\n",
+				accountID, getMapKeys(account.CustomSettings))
+
+			// 确保CustomSettings不为nil
+			if account.CustomSettings == nil {
+				account.CustomSettings = make(models.JSONMap)
+				fmt.Printf("OAuth2: Initialized nil CustomSettings for account %d\n", accountID)
+			}
+
+			// 保存旧的refresh token用于日志
+			oldRefreshToken := account.CustomSettings["refresh_token"]
+
+			// 更新refresh_token
+			account.CustomSettings["refresh_token"] = newRefreshToken
+
+			// 保存更新后的CustomSettings
+			result := s.db.Model(&models.EmailAccount{}).
+				Where("id = ?", accountID).
+				Update("custom_settings", account.CustomSettings)
+
+			if result.Error != nil {
+				fmt.Printf("OAuth2: Failed to update refresh token in CustomSettings for account %d: %v\n", accountID, result.Error)
+			} else {
+				fmt.Printf("OAuth2: Successfully updated refresh token in CustomSettings for account %d (old: %d chars, new: %d chars)\n",
+					accountID, len(oldRefreshToken), len(newRefreshToken))
+			}
 		}
 	}
 
 	// 更新缓存
 	s.cacheMutex.Lock()
+
+	// 计算不同provider的缓存过期时间
+	var expirationTime time.Duration
+	switch providerType {
+	case "gmail":
+		expirationTime = 55 * time.Minute // Gmail access token 1小时过期
+	case "outlook":
+		expirationTime = 55 * time.Minute // Outlook access token 1小时过期
+	default:
+		expirationTime = 55 * time.Minute // 默认55分钟
+	}
+
 	s.tokenCache[cacheKey] = &TokenCacheEntry{
 		AccessToken: newAccessToken,
-		ExpiresAt:   time.Now().Add(55 * time.Minute), // 比实际过期时间早5分钟
+		ExpiresAt:   time.Now().Add(expirationTime),
 		RefreshTime: time.Now(),
 	}
 	s.cacheMutex.Unlock()
+
+	// 清理可能存在的旧缓存条目（基于旧的refresh token）
+	s.cleanupOldCacheEntries(providerType, clientID, refreshToken)
 
 	fmt.Printf("OAuth2: Token refreshed and cached for account %d\n", accountID)
 	return newAccessToken, nil
@@ -301,7 +390,7 @@ func (s *OAuth2Service) RefreshAccessTokenForProvider(providerType string, clien
 			errInfo += "\nPossible causes: 1) Refresh token expired 2) Token already used 3) Invalid client_id 4) User revoked permissions"
 		}
 
-		return "", fmt.Errorf(errInfo)
+		return "", fmt.Errorf("%s", errInfo)
 	}
 
 	accessToken, ok := result["access_token"].(string)
@@ -406,7 +495,7 @@ func (s *OAuth2Service) RefreshAccessTokenForProviderWithProxy(providerType stri
 			errInfo += "\nPossible causes: 1) Refresh token expired 2) Token already used 3) Invalid client_id 4) User revoked permissions"
 		}
 
-		return "", "", fmt.Errorf(errInfo)
+		return "", "", fmt.Errorf("%s", errInfo)
 	}
 
 	accessToken, ok := result["access_token"].(string)

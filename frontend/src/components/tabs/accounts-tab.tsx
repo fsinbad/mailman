@@ -11,6 +11,8 @@ import EnhancedAddAccountModal from '@/components/modals/enhanced-add-account-mo
 import EditAccountModal from '@/components/modals/edit-account-modal'
 import SyncAccountModal from '@/components/modals/sync-account-modal'
 import BatchSyncConfigModal from '@/components/modals/batch-sync-config-modal'
+import OutlookTokenModal from '@/components/modals/outlook-token-modal'
+import OutlookThunderbirdModal from '@/components/modals/outlook-thunderbird-modal'
 
 // 视图类型
 type ViewType = 'grid' | 'list' | 'table'
@@ -127,6 +129,8 @@ export default function AccountsTab() {
     // 下拉菜单状态
     const [showAddDropdown, setShowAddDropdown] = useState(false)
     const [gmailOAuth2Available, setGmailOAuth2Available] = useState(false)
+    const [showOutlookTokenModal, setShowOutlookTokenModal] = useState(false)
+    const [showOutlookThunderbirdModal, setShowOutlookThunderbirdModal] = useState(false)
     const [outlookOAuth2Available, setOutlookOAuth2Available] = useState(false)
 
     // 模态框预设参数
@@ -386,6 +390,18 @@ export default function AccountsTab() {
     const handleRegularAddAccount = () => {
         setModalPresets({})
         setShowEnhancedAddModal(true)
+        setShowAddDropdown(false)
+    }
+
+    // 处理Outlook已有Token添加账户
+    const handleOutlookTokenAddAccount = () => {
+        setShowOutlookTokenModal(true)
+        setShowAddDropdown(false)
+    }
+
+    // 处理Outlook Thunderbird授权添加账户
+    const handleOutlookThunderbirdAddAccount = () => {
+        setShowOutlookThunderbirdModal(true)
         setShowAddDropdown(false)
     }
 
@@ -664,6 +680,28 @@ export default function AccountsTab() {
                                             </div>
                                         </button>
                                     )}
+
+                                    <button
+                                        onClick={handleOutlookTokenAddAccount}
+                                        className="flex w-full items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                                    >
+                                        <Settings className="mr-3 h-4 w-4 text-blue-600" />
+                                        <div className="flex flex-col items-start">
+                                            <span>新增Outlook(已有Token)</span>
+                                            <span className="text-xs text-gray-500 dark:text-gray-400">手动输入已有Token</span>
+                                        </div>
+                                    </button>
+
+                                    <button
+                                        onClick={handleOutlookThunderbirdAddAccount}
+                                        className="flex w-full items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                                    >
+                                        <Shield className="mr-3 h-4 w-4 text-orange-600" />
+                                        <div className="flex flex-col items-start">
+                                            <span>新增Outlook(Thunderbird)</span>
+                                            <span className="text-xs text-gray-500 dark:text-gray-400">使用Thunderbird授权</span>
+                                        </div>
+                                    </button>
                                 </div>
                             )}
                         </div>
@@ -1229,6 +1267,38 @@ export default function AccountsTab() {
                 selectedAccounts={selectedAccounts.map(id =>
                     accounts.find(account => account.id === id)!
                 ).filter(Boolean)}
+            />
+
+            {/* Outlook Token模态框 */}
+            <OutlookTokenModal
+                isOpen={showOutlookTokenModal}
+                onClose={() => {
+                    setShowOutlookTokenModal(false)
+                    loadAccounts()
+                }}
+                onSuccess={() => {
+                    setShowOutlookTokenModal(false)
+                    loadAccounts()
+                }}
+                onError={(error) => {
+                    alert(error)
+                }}
+            />
+
+            {/* Outlook Thunderbird模态框 */}
+            <OutlookThunderbirdModal
+                isOpen={showOutlookThunderbirdModal}
+                onClose={() => {
+                    setShowOutlookThunderbirdModal(false)
+                    loadAccounts()
+                }}
+                onSuccess={() => {
+                    setShowOutlookThunderbirdModal(false)
+                    loadAccounts()
+                }}
+                onError={(error) => {
+                    alert(error)
+                }}
             />
         </>
     )

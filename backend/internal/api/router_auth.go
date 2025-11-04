@@ -48,6 +48,7 @@ func NewRouterWithAuth(
 
 	// OAuth2 callback endpoints (public - called by external providers)
 	apiRouter.HandleFunc("/oauth2/callback/{provider}", oauth2Handler.HandleCallback).Methods("GET")
+	apiRouter.HandleFunc("/oauth2/exchange-thunderbird-token", oauth2Handler.ExchangeThunderbirdToken).Methods("POST")
 
 	// Public WebSocket endpoints (no auth required)
 	apiRouter.HandleFunc("/ws/wait-email", handler.WaitEmailWebSocketHandler).Methods("GET")
@@ -70,6 +71,7 @@ func NewRouterWithAuth(
 
 	// Account management (protected)
 	authRouter.HandleFunc("/accounts", handler.CreateAccountHandler).Methods("POST")
+	authRouter.HandleFunc("/accounts/upsert", handler.UpsertAccountHandler).Methods("POST")
 	authRouter.HandleFunc("/accounts", handler.GetAccountsHandler).Methods("GET")
 	authRouter.HandleFunc("/accounts/paginated", handler.GetAccountsPaginatedHandler).Methods("GET")
 	authRouter.HandleFunc("/accounts/{id}", handler.GetAccountHandler).Methods("GET")

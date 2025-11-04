@@ -1733,6 +1733,97 @@ func (h *APIHandler) UpdateAccountHandler(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(existingAccount)
 }
 
+// UpsertAccountHandler creates or updates an email account (Outlook Token flow)
+// @Summary Create or update an email account
+// @Description Create a new email account or update existing one based on email address
+// @Tags accounts
+// @Accept json
+// @Produce json
+// @Param account body CreateAccountRequest true "Email Account"
+// @Success 200 {object} models.EmailAccount
+// @Success 201 {object} models.EmailAccount
+// @Failure 400 {object} ErrorResponse
+// @Router /api/accounts/upsert [post]
+func (h *APIHandler) UpsertAccountHandler(w http.ResponseWriter, r *http.Request) {
+	var request CreateAccountRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// First, try to find existing account by email address
+	existingAccount, err := h.EmailAccountRepo.GetByEmail(request.EmailAddress)
+
+	var account *models.EmailAccount
+	var activityType models.ActivityType
+
+	if err != nil {
+		// Account doesn't exist, create new one
+		activityType = models.ActivityAccountAdded
+
+		account = &models.EmailAccount{
+			EmailAddress:     request.EmailAddress,
+			AuthType:         request.AuthType,
+			Password:         request.Password,
+			Token:            request.Token,
+			MailProviderID:   request.MailProviderID,
+			OAuth2ProviderID: request.OAuth2ProviderID,
+			Proxy:            request.Proxy,
+			IsDomainMail:     request.IsDomainMail,
+			Domain:           request.Domain,
+			CustomSettings:   request.CustomSettings,
+		}
+
+		if err := h.EmailAccountRepo.Create(account); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusCreated)
+	} else {
+		// Account exists, update it
+		activityType = models.ActivityAccountUpdated
+		account = existingAccount
+
+		// Update fields if they are provided
+		if request.AuthType != "" {
+			account.AuthType = request.AuthType
+		}
+		if request.Password != "" {
+			account.Password = request.Password
+		}
+		if request.Token != "" {
+			account.Token = request.Token
+		}
+		if request.MailProviderID != nil {
+			account.MailProviderID = request.MailProviderID
+		}
+		if request.OAuth2ProviderID != nil {
+			account.OAuth2ProviderID = request.OAuth2ProviderID
+		}
+		if request.Proxy != "" {
+			account.Proxy = request.Proxy
+		}
+		if request.CustomSettings != nil {
+			account.CustomSettings = request.CustomSettings
+		}
+
+		if err := h.EmailAccountRepo.Update(account); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}
+
+	// Log activity
+	userID := getUserIDFromContext(r)
+	h.activityLogger.LogAccountActivity(activityType, account, userID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(account)
+}
+
 // DeleteAccountHandler deletes an email account
 // @Summary Delete an email account
 // @Description Delete an email account

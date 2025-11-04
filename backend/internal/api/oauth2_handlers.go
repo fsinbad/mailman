@@ -685,6 +685,54 @@ func (h *OAuth2Handler) ExchangeToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ExchangeThunderbirdToken exchanges authorization code for tokens using Thunderbird configuration
+func (h *OAuth2Handler) ExchangeThunderbirdToken(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		Code string `json:"code"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if request.Code == "" {
+		http.Error(w, "authorization code is required", http.StatusBadRequest)
+		return
+	}
+
+	// Thunderbird固定配置
+	clientId := "9e5f94bc-e8a4-4e73-b8be-63364c29d753"
+	scope := "offline_access https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/POP.AccessAsUser.All https://outlook.office.com/EWS.AccessAsUser.All https://outlook.office.com/SMTP.Send"
+
+	// 使用OAuth2服务来获取token
+	accessToken, refreshToken, err := h.oauth2Service.RefreshAccessTokenForProviderWithProxy(
+		"thunderbird",
+		clientId,
+		"", // Thunderbird是公开客户端，无需secret
+		request.Code,
+		"", // 没有代理
+	)
+
+	if err != nil {
+		fmt.Printf("Thunderbird token exchange failed: %v\n", err)
+		http.Error(w, fmt.Sprintf("failed to exchange authorization code: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// 返回获取的tokens
+	response := map[string]interface{}{
+		"access_token":  accessToken,
+		"refresh_token": refreshToken,
+		"token_type":    "Bearer",
+		"expires_in":    3600, // 1小时
+		"scope":         scope,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
 // RefreshTokenHandler refreshes access token using refresh token
 func (h *OAuth2Handler) RefreshTokenHandler(w http.ResponseWriter, r *http.Request) {
 	var request struct {

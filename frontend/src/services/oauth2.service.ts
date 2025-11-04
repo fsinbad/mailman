@@ -125,6 +125,17 @@ export class OAuth2Service {
     }
 
     /**
+     * 交换Thunderbird授权码���访问令牌
+     */
+    async exchangeThunderbirdCode(code: string): Promise<OAuth2TokenResponse> {
+        const response = await apiClient.post<OAuth2TokenResponse>(
+            `${this.basePath}/exchange-thunderbird-token`,
+            { code }
+        );
+        return response;
+    }
+
+    /**
      * 启用OAuth2提供商
      */
     async enableProvider(provider: OAuth2ProviderType): Promise<void> {

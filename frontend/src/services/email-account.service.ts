@@ -59,6 +59,38 @@ export class EmailAccountService {
     }
 
     /**
+     * 创建或更新邮箱账户 (upsert操作)
+     * 根据邮箱地址判断是否存在，如果存在则更新，否则创建
+     */
+    async upsertAccount(data: CreateEmailAccountRequest): Promise<EmailAccount> {
+        // 转换为后端期望的格式
+        const payload: any = {
+            emailAddress: data.email_address,
+            authType: data.auth_type || 'password',
+            mailProviderId: data.mail_provider_id,
+            password: data.password,
+            token: data.token,
+            proxy: data.proxy,
+            isDomainMail: data.is_domain_mail || false,
+            domain: data.domain,
+            customSettings: data.custom_settings
+        };
+
+        // 移除未定义的字段
+        Object.keys(payload).forEach(key => {
+            if (payload[key] === undefined) {
+                delete payload[key];
+            }
+        });
+
+        const response = await apiClient.post<EmailAccount>(
+            `${this.basePath}/upsert`,
+            payload
+        );
+        return response;
+    }
+
+    /**
      * 创建邮箱账户
      */
     async createAccount(data: CreateEmailAccountRequest): Promise<EmailAccount> {
