@@ -237,6 +237,12 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
         loadDeveloperMode()
     }, [])
 
+    // 监听主题变化
+    useEffect(() => {
+        console.log('[Sidebar] 主题变化:', theme)
+        console.log('[Sidebar] 当前html类:', document.documentElement.className)
+    }, [theme])
+
     // 菜单组配置 - 根据开发者模式动态显示
     const menuGroups: MenuGroup[] = []
 
@@ -315,7 +321,11 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
             <div className="flex-shrink-0 border-t border-gray-200 p-4 dark:border-gray-800">
                 {/* Theme toggle */}
                 <button
-                    onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                    onClick={() => {
+                        const newTheme = theme === 'dark' ? 'light' : 'dark'
+                        console.log('[Sidebar] 切换主题:', theme, '->', newTheme)
+                        setTheme(newTheme)
+                    }}
                     className={cn(
                         'mb-2 flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800',
                         collapsed && 'justify-center'

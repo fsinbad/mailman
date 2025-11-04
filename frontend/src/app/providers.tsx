@@ -24,8 +24,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
     return (
         <QueryClientProvider client={queryClient}>
-            <AuthProvider>
-                <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+            <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+                <AuthProvider>
                     {children}
                     <Toaster
                         position="top-right"
@@ -51,8 +51,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
                             },
                         }}
                     />
-                </ThemeProvider>
-            </AuthProvider>
+                </AuthProvider>
+            </ThemeProvider>
             <ReactQueryDevtools initialIsOpen={false} />
         </QueryClientProvider>
     )

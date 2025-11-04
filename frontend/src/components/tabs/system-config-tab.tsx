@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Settings, Save, RotateCcw, AlertCircle, CheckCircle, Info } from 'lucide-react'
 import { systemConfigService, SystemConfig } from '@/services/system-config.service'
+import { ThemeTest } from '@/components/theme-test'
 import { cn } from '@/lib/utils'
 
 export default function SystemConfigTab() {
@@ -235,6 +236,9 @@ export default function SystemConfigTab() {
                 <Settings className="h-6 w-6 text-primary-600" />
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white">系统配置</h1>
             </div>
+
+            {/* 主题测试组件 - 用于调试主题切换 */}
+            <ThemeTest />
 
             {/* 搜索和筛选 */}
             <div className="flex items-center justify-between">
