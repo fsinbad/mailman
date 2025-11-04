@@ -79,12 +79,16 @@ export default function OutlookThunderbirdModal({
         onClose()
     }
 
-    // 步骤1: 复制授权URL
-    const handleCopyUrl = async () => {
+    // 步骤1: 复制授权URL并进入下一步
+    const handleCopyUrlAndNext = async () => {
         try {
             await navigator.clipboard.writeText(THUNDERBIRD_CONFIG.authUrl)
             setCopied(true)
-            setTimeout(() => setCopied(false), 2000)
+            // 显示已复制提示后自动进入下一步
+            setTimeout(() => {
+                setCopied(false)
+                setCurrentStep('code')
+            }, 800)
         } catch (err) {
             onError?.('复制失败，请手动复制')
         }
@@ -119,7 +123,7 @@ export default function OutlookThunderbirdModal({
         }
     }
 
-    const handleExtractCode = () => {
+    const handleExtractCode = async () => {
         if (!stepData.authData.fullUrl && !stepData.authData.code) {
             onError?.('请粘贴完整的回调URL或授权码')
             return
@@ -133,17 +137,34 @@ export default function OutlookThunderbirdModal({
             return
         }
 
-        setStepData(prev => ({
-            ...prev,
-            authData: { ...prev.authData, code }
-        }))
-        setCurrentStep('tokens')
+        // 更新code并获取Tokens
+        try {
+            setLoading(true)
+            const response = await oauth2Service.exchangeThunderbirdCode(code)
+
+            setStepData(prev => ({
+                ...prev,
+                authData: {
+                    ...prev.authData,
+                    code,
+                    accessToken: response.access_token,
+                    refreshToken: response.refresh_token || ''
+                },
+                tokenData: response
+            }))
+
+            // 直接进入第4步（邮箱地址），跳过第3步（tokens展示）
+            setCurrentStep('email')
+        } catch (error: any) {
+            onError?.(error.message || '解析授权码或获取Token失败')
+        } finally {
+            setLoading(false)
+        }
     }
 
-    // 步骤3: 获取Tokens
     const handleGetTokens = async () => {
         if (!stepData.authData.code) {
-            onError?.('授权码不能为空')
+            onError?.('没有可用的授权码，请先完成授权步骤')
             return
         }
 
@@ -161,6 +182,7 @@ export default function OutlookThunderbirdModal({
                 tokenData: response
             }))
 
+            // 成功获取token后，跳转到邮箱步骤
             setCurrentStep('email')
         } catch (error: any) {
             onError?.(error.message || '获取Token失败')
@@ -425,18 +447,12 @@ export default function OutlookThunderbirdModal({
                                                         <textarea
                                                             value={THUNDERBIRD_CONFIG.authUrl}
                                                             readOnly
-                                                            className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg bg-gray-50 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-xs leading-relaxed break-all"
+                                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 dark:bg-gray-700 dark:border-gray-600 dark:text-white text-xs leading-relaxed break-all"
                                                             rows={7}
                                                         />
-                                                        <button
-                                                            onClick={handleCopyUrl}
-                                                            className="absolute top-2 right-2 p-1 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                                                        >
-                                                            {copied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
-                                                        </button>
                                                     </div>
                                                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                                        {copied ? '✓ 已复制到剪贴板' : '点击复制按钮复制授权URL'}
+                                                        点击下方按钮复制授权URL并进入下一步
                                                     </p>
                                                 </div>
 
@@ -452,19 +468,21 @@ export default function OutlookThunderbirdModal({
                                                 </div>
 
                                                 <button
-                                                    onClick={handleCopyUrl}
-                                                    className="w-full flex items-center justify-center space-x-2 px-4 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
+                                                    onClick={handleCopyUrlAndNext}
+                                                    disabled={copied}
+                                                    className="w-full flex items-center justify-center space-x-2 px-4 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:bg-green-600 disabled:hover:bg-green-600 transition-colors"
                                                 >
-                                                    <Copy className="h-4 w-4" />
-                                                    <span>复制授权URL</span>
-                                                </button>
-
-                                                <button
-                                                    onClick={() => setCurrentStep('code')}
-                                                    className="w-full flex items-center justify-center space-x-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                                                >
-                                                    <span>下一步</span>
-                                                    <ArrowRight className="h-4 w-4" />
+                                                    {copied ? (
+                                                        <>
+                                                            <Check className="h-4 w-4" />
+                                                            <span>已复制，进入下一步...</span>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <Copy className="h-4 w-4" />
+                                                            <span>复制URL并下一步</span>
+                                                        </>
+                                                    )}
                                                 </button>
                                             </div>
                                         </motion.div>
@@ -530,18 +548,28 @@ export default function OutlookThunderbirdModal({
                                                 <div className="flex space-x-3">
                                                     <button
                                                         onClick={() => setCurrentStep('url')}
-                                                        className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+                                                        disabled={loading}
+                                                        className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
                                                     >
                                                         <ArrowLeft className="h-4 w-4 inline mr-2" />
                                                         上一步
                                                     </button>
                                                     <button
                                                         onClick={handleExtractCode}
-                                                        disabled={!stepData.authData.fullUrl || !parseAuthorizationCode(stepData.authData.fullUrl)}
+                                                        disabled={!stepData.authData.fullUrl || !parseAuthorizationCode(stepData.authData.fullUrl) || loading}
                                                         className="flex-1 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed"
                                                     >
-                                                        解析授权码
-                                                        <ArrowRight className="h-4 w-4 inline ml-2" />
+                                                        {loading ? (
+                                                            <>
+                                                                <Loader2 className="h-4 w-4 inline mr-2 animate-spin" />
+                                                                <span>解析中...</span>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <span>解析授权码</span>
+                                                                <ArrowRight className="h-4 w-4 inline ml-2" />
+                                                            </>
+                                                        )}
                                                     </button>
                                                 </div>
                                             </div>

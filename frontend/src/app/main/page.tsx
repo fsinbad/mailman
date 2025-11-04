@@ -289,7 +289,7 @@ export default function MainPage() {
     }
 
     return (
-        <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
+        <div className="flex h-screen bg-background">
             {/* 侧边栏 */}
             <Sidebar activeTab={activeTab} onTabChange={handleTabChange} />
 
@@ -308,7 +308,7 @@ export default function MainPage() {
                 />
 
                 {/* Tab内容 */}
-                <main className="flex-1 overflow-hidden bg-gray-50 dark:bg-gray-900">
+                <main className="flex-1 overflow-hidden bg-background">
                     <div className="relative h-full">
                         {openTabs.map((tabId) => (
                             <div

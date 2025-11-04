@@ -63,9 +63,9 @@
   * {
     @apply border-gray-200 dark:border-gray-700;
   }
-  
+
   body {
-    @apply bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100;
+    @apply bg-background text-foreground;
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 
@@ -420,11 +420,3 @@
 
 
 
-@layer base {
-  * {
-    @apply border-border;
-  }
-  body {
-    @apply bg-background text-foreground;
-  }
-}

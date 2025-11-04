@@ -18,13 +18,13 @@ function SettingItem({
     children: React.ReactNode
 }) {
     return (
-        <div className="flex items-start space-x-4 rounded-lg bg-gray-50 p-4 dark:bg-gray-700/50">
-            <div className="rounded-lg bg-white p-2 dark:bg-gray-700">
-                <Icon className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+        <div className="flex items-start space-x-4 rounded-lg bg-muted p-4">
+            <div className="rounded-lg bg-background p-2 border border-border">
+                <Icon className="h-5 w-5 text-muted-foreground" />
             </div>
             <div className="flex-1">
-                <h3 className="font-medium text-gray-900 dark:text-white">{title}</h3>
-                <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">{description}</p>
+                <h3 className="font-medium text-foreground">{title}</h3>
+                <p className="mt-1 text-sm text-muted-foreground">{description}</p>
                 <div className="mt-3">{children}</div>
             </div>
         </div>
@@ -50,8 +50,8 @@ export default function SettingsTab() {
     return (
         <div className="space-y-6">
             {/* 通用设置 */}
-            <div className="rounded-xl bg-white p-6 shadow-sm dark:bg-gray-800">
-                <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-white">
+            <div className="rounded-xl bg-card p-6 shadow-sm border border-border">
+                <h2 className="mb-4 text-lg font-semibold text-foreground">
                     通用设置
                 </h2>
 
@@ -69,7 +69,7 @@ export default function SettingsTab() {
                                     "rounded-lg px-4 py-2 text-sm font-medium transition-colors",
                                     theme === 'light'
                                         ? "bg-primary-600 text-white"
-                                        : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                                        : "bg-muted text-foreground hover:bg-muted/80"
                                 )}
                             >
                                 浅色
@@ -80,7 +80,7 @@ export default function SettingsTab() {
                                     "rounded-lg px-4 py-2 text-sm font-medium transition-colors",
                                     theme === 'dark'
                                         ? "bg-primary-600 text-white"
-                                        : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                                        : "bg-muted text-foreground hover:bg-muted/80"
                                 )}
                             >
                                 深色
@@ -91,7 +91,7 @@ export default function SettingsTab() {
                                     "rounded-lg px-4 py-2 text-sm font-medium transition-colors",
                                     theme === 'system'
                                         ? "bg-primary-600 text-white"
-                                        : "bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+                                        : "bg-muted text-foreground hover:bg-muted/80"
                                 )}
                             >
                                 跟随系统
@@ -109,7 +109,7 @@ export default function SettingsTab() {
                             type="text"
                             value={apiUrl}
                             onChange={(e) => setApiUrl(e.target.value)}
-                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-700"
+                            className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
                         />
                     </SettingItem>
 
@@ -127,22 +127,22 @@ export default function SettingsTab() {
                                     onChange={(e) => setAutoSync(e.target.checked)}
                                     className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                                 />
-                                <span className="text-sm text-gray-700 dark:text-gray-300">
+                                <span className="text-sm text-foreground">
                                     启用自动同步
                                 </span>
                             </label>
                             {autoSync && (
                                 <div className="flex items-center space-x-2">
-                                    <span className="text-sm text-gray-600 dark:text-gray-400">
+                                    <span className="text-sm text-muted-foreground">
                                         间隔:
                                     </span>
                                     <input
                                         type="number"
                                         value={syncInterval}
                                         onChange={(e) => setSyncInterval(e.target.value)}
-                                        className="w-20 rounded-lg border border-gray-300 px-3 py-1 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-700"
+                                        className="w-20 rounded-lg border border-input bg-background px-3 py-1 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
                                     />
-                                    <span className="text-sm text-gray-600 dark:text-gray-400">
+                                    <span className="text-sm text-muted-foreground">
                                         分钟
                                     </span>
                                 </div>
@@ -153,8 +153,8 @@ export default function SettingsTab() {
             </div>
 
             {/* 通知设置 */}
-            <div className="rounded-xl bg-white p-6 shadow-sm dark:bg-gray-800">
-                <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-white">
+            <div className="rounded-xl bg-card p-6 shadow-sm border border-border">
+                <h2 className="mb-4 text-lg font-semibold text-foreground">
                     通知设置
                 </h2>
 
@@ -170,7 +170,7 @@ export default function SettingsTab() {
                             onChange={(e) => setEmailNotifications(e.target.checked)}
                             className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                         />
-                        <span className="text-sm text-gray-700 dark:text-gray-300">
+                        <span className="text-sm text-foreground">
                             启用桌面通知
                         </span>
                     </label>
@@ -178,8 +178,8 @@ export default function SettingsTab() {
             </div>
 
             {/* 安全设置 */}
-            <div className="rounded-xl bg-white p-6 shadow-sm dark:bg-gray-800">
-                <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-white">
+            <div className="rounded-xl bg-card p-6 shadow-sm border border-border">
+                <h2 className="mb-4 text-lg font-semibold text-foreground">
                     安全设置
                 </h2>
 
@@ -189,7 +189,7 @@ export default function SettingsTab() {
                         title="两步验证"
                         description="增强账户安全性"
                     >
-                        <button className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600">
+                        <button className="rounded-lg bg-muted px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted/80">
                             配置两步验证
                         </button>
                     </SettingItem>
@@ -199,7 +199,7 @@ export default function SettingsTab() {
                         title="API密钥"
                         description="管理API访问密钥"
                     >
-                        <button className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600">
+                        <button className="rounded-lg bg-muted px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted/80">
                             管理密钥
                         </button>
                     </SettingItem>

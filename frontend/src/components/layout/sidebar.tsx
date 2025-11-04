@@ -33,6 +33,7 @@ import {
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { useTheme } from '@/components/theme-provider'
+import { useAuth } from '@/contexts/auth-context'
 import { systemConfigService } from '@/services/system-config.service'
 
 // 菜单项接口定义
@@ -218,6 +219,7 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
     const [developerMode, setDeveloperMode] = useState(false)
     const [loading, setLoading] = useState(true)
     const { theme, setTheme } = useTheme()
+    const { logout } = useAuth()
 
     // 获取开发者模式配置
     useEffect(() => {
@@ -275,12 +277,12 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
     return (
         <div
             className={cn(
-                'relative flex h-screen flex-col border-r border-gray-200 bg-white transition-all duration-300 dark:border-gray-800 dark:bg-gray-900',
+                'relative flex h-screen flex-col border-r border-gray-200 bg-white transition-all duration-300 dark:border-gray-700 dark:bg-card',
                 collapsed ? 'w-16' : 'w-64'
             )}
         >
             {/* Logo */}
-            <div className="flex-shrink-0 flex h-16 items-center justify-between border-b border-gray-200 px-4 dark:border-gray-800">
+            <div className="flex-shrink-0 flex h-16 items-center justify-between border-b border-gray-200 px-4 dark:border-gray-700">
                 <div
                     className={cn(
                         'flex items-center space-x-2 text-lg font-semibold',
@@ -318,7 +320,7 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
             </nav>
 
             {/* Bottom section */}
-            <div className="flex-shrink-0 border-t border-gray-200 p-4 dark:border-gray-800">
+            <div className="flex-shrink-0 border-t border-gray-200 p-4 dark:border-gray-700">
                 {/* Theme toggle */}
                 <button
                     onClick={() => {
@@ -341,8 +343,9 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
 
                 {/* Logout */}
                 <button
+                    onClick={() => logout()}
                     className={cn(
-                        'flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800',
+                        'flex w-full items-center rounded-lg px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted',
                         collapsed && 'justify-center'
                     )}
                 >

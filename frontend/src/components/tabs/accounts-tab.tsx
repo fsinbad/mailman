@@ -140,6 +140,15 @@ export default function AccountsTab() {
         autoTriggerOAuth2?: boolean
     }>({})
 
+    // Outlook Token模态框的预填充数据（来自Thunderbird）
+    const [outlookTokenPresetData, setOutlookTokenPresetData] = useState<{
+        email?: string
+        clientId?: string
+        accessToken?: string
+        refreshToken?: string
+        fromThunderbird?: boolean
+    } | null>(null)
+
     // 过滤器状态
     const [providerFilter, setProviderFilter] = useState<string | null>(null)
 
@@ -170,6 +179,8 @@ export default function AccountsTab() {
     useEffect(() => {
         const handleTriggerOutlookTokenModal = (event: any) => {
             console.log('[Accounts Tab] 收到triggerOutlookTokenModal事件，数据:', event.detail)
+            // 存储预填充数据到state而不是通过事件传递
+            setOutlookTokenPresetData(event.detail)
             setShowOutlookTokenModal(true)
         }
 
@@ -1288,15 +1299,18 @@ export default function AccountsTab() {
                 isOpen={showOutlookTokenModal}
                 onClose={() => {
                     setShowOutlookTokenModal(false)
+                    setOutlookTokenPresetData(null)
                     loadAccounts()
                 }}
                 onSuccess={() => {
                     setShowOutlookTokenModal(false)
+                    setOutlookTokenPresetData(null)
                     loadAccounts()
                 }}
                 onError={(error) => {
                     alert(error)
                 }}
+                presetData={outlookTokenPresetData}
             />
 
             {/* Outlook Thunderbird模态框 */}

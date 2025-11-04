@@ -13,6 +13,13 @@ interface OutlookTokenModalProps {
     onClose: () => void
     onSuccess?: () => void
     onError?: (error: string) => void
+    presetData?: {
+        email?: string
+        clientId?: string
+        accessToken?: string
+        refreshToken?: string
+        fromThunderbird?: boolean
+    } | null
 }
 
 interface OutlookTokenForm {
@@ -40,7 +47,8 @@ export default function OutlookTokenModal({
     isOpen,
     onClose,
     onSuccess,
-    onError
+    onError,
+    presetData
 }: OutlookTokenModalProps) {
     const [currentStep, setCurrentStep] = useState<WorkflowStep>('token')
     const [stepData, setStepData] = useState<StepData>({})
@@ -82,54 +90,34 @@ export default function OutlookTokenModal({
 
     const currentStepIndex = steps.findIndex(step => step.key === currentStep)
 
-    // 监听来自Thunderbird的授权完成事件
+    // 监听presetData的变化，当从Thunderbird获得数据时填充表单
     useEffect(() => {
-        const handleThunderbirdData = (event: any) => {
-            const detail = event.detail
-            console.log('[Outlook Token Modal] 收到triggerOutlookTokenModal事件，数据:', detail)
-            if (detail) {
-                console.log('[Outlook Token Modal] 开始填充表单数据')
-                // 预填充Token表单数据
-                setTokenForm(prev => {
-                    const newForm = {
-                        ...prev,
-                        email: detail.email || '',
-                        clientId: detail.clientId || '',
-                        accessToken: detail.accessToken || '',
-                        refreshToken: detail.refreshToken || ''
-                    }
-                    console.log('[Outlook Token Modal] 新的表单数据:', newForm)
-                    return newForm
-                })
-
-                // 如果来自Thunderbird，直接跳到验证步骤
-                if (detail.fromThunderbird) {
-                    console.log('[Outlook Token Modal] 来自Thunderbird，准备跳转到verify步骤')
-                    // 延迟设置step，确保表单数据已更新
-                    setTimeout(() => {
-                        console.log('[Outlook Token Modal] 跳转到verify步骤')
-                        setCurrentStep('verify')
-                    }, 100)
+        if (presetData && isOpen) {
+            console.log('[Outlook Token Modal] 收到presetData，数据:', presetData)
+            // 预填充Token表单数据
+            setTokenForm(prev => {
+                const newForm = {
+                    ...prev,
+                    email: presetData.email || '',
+                    clientId: presetData.clientId || '',
+                    accessToken: presetData.accessToken || '',
+                    refreshToken: presetData.refreshToken || ''
                 }
-            }
+                console.log('[Outlook Token Modal] 新的表单数据:', newForm)
+                return newForm
+            })
         }
-
-        console.log('[Outlook Token Modal] 注册triggerOutlookTokenModal事件监听')
-        window.addEventListener('triggerOutlookTokenModal', handleThunderbirdData)
-        return () => {
-            console.log('[Outlook Token Modal] 移除triggerOutlookTokenModal事件监听')
-            window.removeEventListener('triggerOutlookTokenModal', handleThunderbirdData)
-        }
-    }, [])
+    }, [presetData, isOpen])
 
     // 仅在modal关闭时重置表单，而非打开时
     useEffect(() => {
         console.log('[Outlook Token Modal] isOpen状态变化:', isOpen)
         if (!isOpen) {
             console.log('[Outlook Token Modal] Modal关闭，重置表单')
-            resetForm()
-        } else {
-            console.log('[Outlook Token Modal] Modal打开')
+            // 延迟重置以避免与presetData逻辑冲突
+            setTimeout(() => {
+                resetForm()
+            }, 0)
         }
     }, [isOpen])
 
