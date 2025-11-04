@@ -95,6 +95,30 @@ class SystemConfigService {
     }
 
     /**
+     * 获取开发者模式配置
+     */
+    async getDeveloperModeConfig(): Promise<boolean> {
+        try {
+            const config = await this.getConfigByKey('developer-mode')
+            console.log('[SystemConfigService] getDeveloperModeConfig - 原始配置:', config)
+            console.log('[SystemConfigService] current_value:', config.current_value, 'type:', typeof config.current_value)
+            const result = config.current_value === true
+            console.log('[SystemConfigService] 最终返回值:', result)
+            return result
+        } catch (error) {
+            console.warn('Failed to get developer mode config, using default:', error)
+            return false // 默认关闭开发者模式
+        }
+    }
+
+    /**
+     * 设置开发者模式配置
+     */
+    async setDeveloperModeConfig(developerMode: boolean): Promise<void> {
+        await this.updateConfigValue('developer-mode', developerMode)
+    }
+
+    /**
      * 获取配置的显示值（格式化后的值）
      */
     formatConfigValue(config: SystemConfig): string {

@@ -31,8 +31,9 @@ import {
     FlaskConical,
     type LucideIcon,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useTheme } from '@/components/theme-provider'
+import { systemConfigService } from '@/services/system-config.service'
 
 // 菜单项接口定义
 interface MenuItem {
@@ -214,32 +215,56 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
     const [triggerMenuExpanded, setTriggerMenuExpanded] = useState(true)
     const [pluginMenuExpanded, setPluginMenuExpanded] = useState(true)
     const [developerMenuExpanded, setDeveloperMenuExpanded] = useState(true)
+    const [developerMode, setDeveloperMode] = useState(false)
+    const [loading, setLoading] = useState(true)
     const { theme, setTheme } = useTheme()
 
-    // 菜单组配置
-    const menuGroups: MenuGroup[] = [
-        {
-            title: '高级触发器',
-            icon: Zap,
-            items: triggerNavigation,
-            expanded: triggerMenuExpanded,
-            setExpanded: setTriggerMenuExpanded,
-        },
-        {
-            title: '插件管理',
-            icon: Puzzle,
-            items: pluginNavigation,
-            expanded: pluginMenuExpanded,
-            setExpanded: setPluginMenuExpanded,
-        },
-        {
-            title: '开发者模式',
-            icon: Code2,
-            items: developerNavigation,
-            expanded: developerMenuExpanded,
-            setExpanded: setDeveloperMenuExpanded,
-        },
-    ]
+    // 获取开发者模式配置
+    useEffect(() => {
+        const loadDeveloperMode = async () => {
+            try {
+                const isDeveloperMode = await systemConfigService.getDeveloperModeConfig()
+                setDeveloperMode(isDeveloperMode)
+                console.log('[Sidebar] 开发者模式状态:', isDeveloperMode)
+            } catch (error) {
+                console.error('[Sidebar] 获取开发者模式配置失败:', error)
+                setDeveloperMode(false)
+            } finally {
+                setLoading(false)
+            }
+        }
+
+        loadDeveloperMode()
+    }, [])
+
+    // 菜单组配置 - 根据开发者模式动态显示
+    const menuGroups: MenuGroup[] = []
+
+    if (developerMode) {
+        menuGroups.push(
+            {
+                title: '高级触发器',
+                icon: Zap,
+                items: triggerNavigation,
+                expanded: triggerMenuExpanded,
+                setExpanded: setTriggerMenuExpanded,
+            },
+            {
+                title: '插件管理',
+                icon: Puzzle,
+                items: pluginNavigation,
+                expanded: pluginMenuExpanded,
+                setExpanded: setPluginMenuExpanded,
+            },
+            {
+                title: '开发者模式',
+                icon: Code2,
+                items: developerNavigation,
+                expanded: developerMenuExpanded,
+                setExpanded: setDeveloperMenuExpanded,
+            }
+        )
+    }
 
     return (
         <div

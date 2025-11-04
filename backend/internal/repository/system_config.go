@@ -79,6 +79,19 @@ func (r *SystemConfigRepository) Delete(key string) error {
 func (r *SystemConfigRepository) InitializeDefaultConfigs() error {
 	defaultConfigs := []models.SystemConfig{
 		{
+			Key:         "developer-mode",
+			Name:        "开发者模式",
+			Description: "开启后将显示高级触发器、插件管理、开发者工具等高级功能。仅建议开发者使用。",
+			ValueType:   models.ConfigTypeBoolean,
+			DefaultValue: models.JSONMap{
+				"value": "false",
+			},
+			Category:   "general",
+			IsEditable: true,
+			IsVisible:  true,
+			SortOrder:  1,
+		},
+		{
 			Key:         "oauth2-auto-open",
 			Name:        "OAuth2自动打开授权窗口",
 			Description: "控制是否在启动OAuth2授权时自动打开授权窗口。关闭后需要手动点击按钮或复制链接。",

@@ -124,3 +124,13 @@ func (s *SystemConfigService) GetOAuth2AutoOpenConfig() (bool, error) {
 func (s *SystemConfigService) SetOAuth2AutoOpenConfig(autoOpen bool) error {
 	return s.UpdateConfigValue("oauth2-auto-open", autoOpen)
 }
+
+// GetDeveloperModeConfig 获取开发者模式配置的便捷方法
+func (s *SystemConfigService) GetDeveloperModeConfig() (bool, error) {
+	return s.GetBoolConfig("developer-mode")
+}
+
+// SetDeveloperModeConfig 设置开发者模式配置的便捷方法
+func (s *SystemConfigService) SetDeveloperModeConfig(developerMode bool) error {
+	return s.UpdateConfigValue("developer-mode", developerMode)
+}
