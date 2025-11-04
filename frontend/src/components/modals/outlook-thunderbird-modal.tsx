@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react'
 import { X, Copy, Check, AlertCircle, Loader2, ArrowRight, ArrowLeft, Shield, Eye, EyeOff, Info, ExternalLink, Mail, Settings } from 'lucide-react'
 import { oauth2Service } from '@/services/oauth2.service'
-import { emailAccountService } from '@/services/email-account.service'
 import { cn } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
 
@@ -170,8 +169,8 @@ export default function OutlookThunderbirdModal({
         }
     }
 
-    // 步骤4: 输入邮箱地址并创建账户
-    const handleCompleteAuth = async () => {
+    // 步骤4: 输入邮箱地址并触发Outlook已有Token模态框
+    const handleCompleteAuth = () => {
         if (!stepData.authData.email) {
             onError?.('请输入邮箱地址')
             return
@@ -184,44 +183,21 @@ export default function OutlookThunderbirdModal({
             return
         }
 
-        try {
-            setLoading(true)
-
-            // 查找Outlook邮件提供商
-            const providers = await emailAccountService.getProviders()
-            const outlookProvider = providers.find(p => p.type.toLowerCase() === 'outlook')
-
-            if (!outlookProvider) {
-                onError?.('未找到Outlook邮件提供商配置')
-                return
+        // 触发Outlook已有Token模态框，预填充Thunderbird获取的数据
+        const event = new CustomEvent('triggerOutlookTokenModal', {
+            detail: {
+                email: stepData.authData.email,
+                clientId: THUNDERBIRD_CONFIG.clientId,
+                accessToken: stepData.authData.accessToken,
+                refreshToken: stepData.authData.refreshToken,
+                // 标记为Thunderbird来源，不需要输入token
+                fromThunderbird: true
             }
+        })
+        window.dispatchEvent(event)
 
-            const payload: any = {
-                email_address: stepData.authData.email,
-                mail_provider_id: outlookProvider.id,
-                auth_type: 'oauth2',
-                custom_settings: {
-                    client_id: THUNDERBIRD_CONFIG.clientId,
-                    refresh_token: stepData.authData.refreshToken,
-                    access_token: stepData.authData.accessToken
-                }
-            }
-
-            // 使用upsert接口，自动处理创建或更新逻辑
-            const account = await emailAccountService.upsertAccount(payload)
-            console.log('Successfully created or updated Thunderbird account:', account.emailAddress)
-
-            // 成功回调
-            onSuccess?.()
-            onError?.(undefined as any)
-
-            // 关闭当前模态框
-            handleClose()
-        } catch (error: any) {
-            onError?.(error.message || '账户操作失败')
-        } finally {
-            setLoading(false)
-        }
+        // 关闭当前模态框
+        handleClose()
     }
 
     if (!isOpen) return null
@@ -701,20 +677,11 @@ export default function OutlookThunderbirdModal({
                                                     </button>
                                                     <button
                                                         onClick={handleCompleteAuth}
-                                                        disabled={!stepData.authData.email || loading}
-                                                        className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                                                        disabled={!stepData.authData.email}
+                                                        className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
                                                     >
-                                                        {loading ? (
-                                                            <>
-                                                                <Loader2 className="h-4 w-4 inline mr-2 animate-spin" />
-                                                                <span>创建中...</span>
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <Mail className="h-4 w-4 inline mr-2" />
-                                                                <span>完成授权</span>
-                                                            </>
-                                                        )}
+                                                        <Mail className="h-4 w-4 inline mr-2" />
+                                                        <span>完成授权</span>
                                                     </button>
                                                 </div>
                                             </div>

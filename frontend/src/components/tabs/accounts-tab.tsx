@@ -166,6 +166,19 @@ export default function AccountsTab() {
         }
     }, [])
 
+    // 监听来自Thunderbird模态框的事件，打开Outlook Token模态框
+    useEffect(() => {
+        const handleTriggerOutlookTokenModal = () => {
+            setShowOutlookTokenModal(true)
+        }
+
+        window.addEventListener('triggerOutlookTokenModal', handleTriggerOutlookTokenModal as EventListener)
+
+        return () => {
+            window.removeEventListener('triggerOutlookTokenModal', handleTriggerOutlookTokenModal as EventListener)
+        }
+    }, [])
+
     // 检测OAuth2配置可用性
     const checkOAuth2Availability = async () => {
         try {

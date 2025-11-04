@@ -88,6 +88,33 @@ export default function OutlookTokenModal({
         }
     }, [isOpen])
 
+    // 监听来自Thunderbird的授权完成事件
+    useEffect(() => {
+        const handleThunderbirdData = (event: any) => {
+            const detail = event.detail
+            if (detail) {
+                // 预填充Token表单数据
+                setTokenForm(prev => ({
+                    ...prev,
+                    email: detail.email || '',
+                    clientId: detail.clientId || '',
+                    accessToken: detail.accessToken || '',
+                    refreshToken: detail.refreshToken || ''
+                }))
+
+                // 如果来自Thunderbird，直接跳到验证步骤
+                if (detail.fromThunderbird) {
+                    setCurrentStep('verify')
+                }
+            }
+        }
+
+        window.addEventListener('triggerOutlookTokenModal', handleThunderbirdData)
+        return () => {
+            window.removeEventListener('triggerOutlookTokenModal', handleThunderbirdData)
+        }
+    }, [])
+
     const resetForm = () => {
         setCurrentStep('token')
         setStepData({})
