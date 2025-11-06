@@ -39,7 +39,7 @@ COPY nginx-all.conf /etc/nginx/nginx.conf
 RUN rm -f /etc/nginx/conf.d/default.conf
 
 # Create directories and files
-RUN mkdir -p /app && touch /app/email.txt
+RUN mkdir -p /app /app/data && touch /app/email.txt
 
 # Create supervisor configuration
 RUN mkdir -p /etc/supervisor/conf.d

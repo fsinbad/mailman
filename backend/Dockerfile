@@ -19,8 +19,8 @@ COPY . .
 # Tidy go modules
 RUN go mod tidy
 
-# Build the application (try without CGO first for better compatibility)
-RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags '-w -extldflags "-static"' -o mailman ./cmd/mailman
+# Build the application (with CGO for MySQL support)
+RUN CGO_ENABLED=1 GOOS=linux go build -a -ldflags '-w' -o mailman ./cmd/mailman
 
 # Final stage
 FROM alpine:latest

@@ -1,0 +1,309 @@
+# Production deployment values for mailman Helm chart
+# Uses separated services with MatrixDB database
+
+# Global configuration
+global:
+  imageRegistry: ""
+  storageClass: ""
+
+# Enable MatrixDB database
+mysql:
+  enabled: false  # Disable bundled MySQL
+
+# Mailman application configuration - Separated services mode
+mailman:
+  # Backend configuration
+  backend:
+    enabled: true
+    replicaCount: 1
+
+    # Image configuration - using fixed CGO image
+    image:
+      registry: docker.io/library
+      repository: mailman-backend
+      tag: "fixed-cgo"
+      pullPolicy: Never
+      pullSecrets: []
+
+    # Resource limits and requests
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+      requests:
+        cpu: 500m
+        memory: 512Mi
+
+    # Horizontal Pod Autoscaler
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 80
+      targetMemoryUtilizationPercentage: 80
+
+    # Pod configuration
+    podAnnotations: {}
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      runAsUser: 1000
+
+    # Environment variables
+    env:
+      # Server Configuration
+      SERVER_HOST: "0.0.0.0"
+      SERVER_PORT: 8080
+
+      # Database Configuration (MariaDB - MySQL compatible)
+      DB_DRIVER: mysql
+      DB_HOST: "mariadb"
+      DB_PORT: "3306"
+      DB_USER: "mailman"
+      DB_PASSWORD: "mailman123"
+      DB_NAME: "mailman"
+      DB_SSLMODE: "disable"
+
+      # Development mode
+      DEV_MODE: false
+
+    # Service configuration
+    service:
+      type: ClusterIP
+      port: 8080
+      annotations: {}
+
+    # Health check configuration
+    livenessProbe:
+      httpGet:
+        path: /api/health
+        port: http
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+
+    readinessProbe:
+      httpGet:
+        path: /api/health
+        port: http
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+
+    # Node selector, tolerations, affinity
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+  # Frontend configuration
+  frontend:
+    enabled: true
+    replicaCount: 1
+
+    # Image configuration - using production image
+    image:
+      registry: ghcr.io
+      repository: seongminhwan/mailman-frontend
+      tag: "latest"
+      pullPolicy: IfNotPresent
+      pullSecrets: []
+
+    # Resource limits and requests
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 250m
+        memory: 256Mi
+
+    # Horizontal Pod Autoscaler
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 80
+      targetMemoryUtilizationPercentage: 80
+
+    # Pod configuration
+    podAnnotations: {}
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 101
+      runAsGroup: 101
+      fsGroup: 101
+
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      runAsUser: 101
+
+    # Environment variables
+    env:
+      NODE_ENV: production
+      API_BASE_URL: "http://mailman-test-backend:8080"
+
+    # Service configuration
+    service:
+      type: ClusterIP
+      port: 80
+      annotations: {}
+
+    # Health check configuration
+    livenessProbe:
+      httpGet:
+        path: /
+        port: http
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+
+    readinessProbe:
+      httpGet:
+        path: /
+        port: http
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+
+    # Node selector, tolerations, affinity
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+  # All-in-One application configuration (disabled)
+  allInOne:
+    enabled: false
+    replicaCount: 0
+
+# Ingress configuration
+ingress:
+  enabled: false
+
+  # Ingress class
+  className: ""
+
+  # Annotations
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+    # cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    # nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+
+  # Host configuration
+  hosts:
+    - host: mailman.local
+      paths:
+        - path: /
+          pathType: Prefix
+
+  # TLS configuration
+  tls: []
+    # - secretName: mailman-tls
+    #   hosts:
+    #     - mailman.local
+
+# ServiceAccount configuration
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Secret configuration
+secrets:
+  # Database credentials for MariaDB
+  database:
+    existingSecret: "mariadb-secret"
+    create: false  # Use existing MariaDB secret
+    name: mariadb-secret
+    keys:
+      username: username
+      userPassword: password
+
+  # OAuth2 configuration
+  oauth2:
+    existingSecret: ""
+    create: true
+    name: mailman-oauth2
+    keys:
+      gmailClientId: gmail-client-id
+      gmailClientSecret: gmail-client-secret
+      outlookClientId: outlook-client-id
+      outlookClientSecret: outlook-client-secret
+
+  # Application secrets
+  app:
+    existingSecret: ""
+    create: true
+    name: mailman-app
+    keys:
+      jwtSecret: jwt-secret
+      encryptionKey: encryption-key
+
+# ConfigMap configuration
+configMaps:
+  # Application configuration
+  app:
+    create: true
+    name: mailman-app-config
+    data:
+      # OAuth2 redirect URIs
+      GMAIL_REDIRECT_URI: "http://localhost:30080/api/oauth2/callback/gmail"
+      OUTLOOK_REDIRECT_URI: "http://localhost:30080/api/oauth2/callback/outlook"
+
+      # Frontend URL for OAuth2 callbacks
+      FRONTEND_URL: "http://localhost:30080"
+
+      # OpenAI configuration (can be overridden)
+      OPENAI_BASE_URL: "https://api.openai.com/v1"
+      OPENAI_MODEL: "gpt-3.5-turbo"
+
+# Persistence configuration (not needed for separated deployment)
+persistence:
+  data:
+    enabled: false
+  logs:
+    enabled: false
+
+# Network policies
+networkPolicy:
+  enabled: false
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+# Monitoring configuration
+monitoring:
+  # Prometheus metrics
+  prometheus:
+    enabled: false
+    serviceMonitor:
+      enabled: false
+      interval: 30s
+      path: /metrics
+      port: http
+
+# Development/Testing configuration
+development:
+  enabled: false
