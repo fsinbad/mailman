@@ -239,10 +239,10 @@ secrets:
       username: username
       userPassword: password
 
-  # OAuth2 configuration
+  # OAuth2 configuration (disabled - configured via frontend)
   oauth2:
     existingSecret: ""
-    create: true
+    create: false
     name: mailman-oauth2
     keys:
       gmailClientId: gmail-client-id

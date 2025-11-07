@@ -2,6 +2,8 @@
 
 本文档介绍如何使用 Helm 在 Kubernetes 集群中部署 Mailman 邮箱管理系统。
 
+**重要更新**：OAuth2 配置现在通过前端页面动态添加，无需在部署时预���配置 Gmail/Outlook 凭据。
+
 ## 📋 部署架构
 
 ```
@@ -42,18 +44,9 @@ helm install mailman ./helm/mailman \
   --values ./helm/mailman/values-matrixdb-production.yaml
 ```
 
-### 4. 配置 OAuth2
+### 4. 验证部署
 
-```bash
-# 创建 OAuth2 配置 (替换为实际值)
-kubectl create secret generic mailman-oauth2 \
-  --from-literal=gmail-client-id='your-gmail-client-id' \
-  --from-literal=gmail-client-secret='your-gmail-client-secret' \
-  --from-literal=outlook-client-id='your-outlook-client-id' \
-  --from-literal=outlook-client-secret='your-outlook-client-secret'
-```
-
-### 5. 验证部署
+OAuth2 配置现在通过前端页面动态添加，无需在部署时预先配置。
 
 ```bash
 # 检查 Pod 状态
