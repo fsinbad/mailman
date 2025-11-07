@@ -19,3 +19,23 @@ spec:
   selector:
     {{- include "mailman.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: backend
+---
+# Backend service alias for frontend proxy
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  labels:
+    {{- include "mailman.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/name: mailman-backend-alias
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "mailman.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: backend

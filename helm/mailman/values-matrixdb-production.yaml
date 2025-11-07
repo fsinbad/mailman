@@ -17,12 +17,12 @@ mailman:
     enabled: true
     replicaCount: 1
 
-    # Image configuration - using fixed CGO image
+    # Image configuration - using GitHub registry latest image
     image:
-      registry: docker.io/library
-      repository: mailman-backend
-      tag: "fixed-cgo"
-      pullPolicy: Never
+      registry: ghcr.io
+      repository: seongminhwan/mailman-backend
+      tag: "latest"
+      pullPolicy: IfNotPresent
       pullSecrets: []
 
     # Resource limits and requests
