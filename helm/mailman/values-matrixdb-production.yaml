@@ -17,7 +17,7 @@ mailman:
     enabled: true
     replicaCount: 1
 
-    # Image configuration - using GitHub registry latest image
+    # Image configuration - using GitHub registry multi-arch images
     image:
       registry: ghcr.io
       repository: seongminhwan/mailman-backend

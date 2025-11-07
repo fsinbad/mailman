@@ -1,4 +1,4 @@
-name: Build and Push Multi-Architecture Docker Images
+name: Build and Push Docker Images
 
 on:
   push:
@@ -11,14 +11,25 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # AMD64 构建任务 (优先级最高)
-  build-backend-amd64:
+  # Multi-architecture build (AMD64 + ARM64)
+  build-images:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-    outputs:
-      backend-digest-amd64: ${{ steps.build.outputs.digest }}
+    strategy:
+      matrix:
+        component: [backend, frontend, all-in-one]
+        include:
+          - component: backend
+            context: ./backend
+            file: ./backend/Dockerfile
+          - component: frontend
+            context: ./frontend
+            file: ./frontend/Dockerfile.nginx
+          - component: all-in-one
+            context: .
+            file: ./Dockerfile.all
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -34,143 +45,10 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.component }}
           tags: |
             type=ref,event=tag
             type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=amd64-latest,enable={{is_default_branch}}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push AMD64 backend
-        id: build
-        uses: docker/build-push-action@v5
-        with:
-          context: ./backend
-          file: ./backend/Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  build-frontend-amd64:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      frontend-digest-amd64: ${{ steps.build.outputs.digest }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend
-          tags: |
-            type=ref,event=tag
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=amd64-latest,enable={{is_default_branch}}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push AMD64 frontend
-        id: build
-        uses: docker/build-push-action@v5
-        with:
-          context: ./frontend
-          file: ./frontend/Dockerfile.nginx
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  build-all-in-one-amd64:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      all-in-one-digest-amd64: ${{ steps.build.outputs.digest }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all
-          tags: |
-            type=ref,event=tag
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=amd64-latest,enable={{is_default_branch}}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push AMD64 all-in-one
-        id: build
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile.all
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  # ARM64 构建任务 (并行，低优先级)
-  build-backend-arm64:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      backend-digest-arm64: ${{ steps.build.outputs.digest }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend
-          tags: |
-            type=ref,event=tag
-            type=raw,value=arm64-latest,enable={{is_default_branch}}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -180,365 +58,22 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push ARM64 backend
-        id: build
+      - name: Build and push multi-architecture image
         uses: docker/build-push-action@v5
         with:
-          context: ./backend
-          file: ./backend/Dockerfile
-          platforms: linux/arm64
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  build-frontend-arm64:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      frontend-digest-arm64: ${{ steps.build.outputs.digest }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend
-          tags: |
-            type=ref,event=tag
-            type=raw,value=arm64-latest,enable={{is_default_branch}}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/arm64
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push ARM64 frontend
-        id: build
-        uses: docker/build-push-action@v5
-        with:
-          context: ./frontend
-          file: ./frontend/Dockerfile.nginx
-          platforms: linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  build-all-in-one-arm64:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      all-in-one-digest-arm64: ${{ steps.build.outputs.digest }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all
-          tags: |
-            type=ref,event=tag
-            type=raw,value=arm64-latest,enable={{is_default_branch}}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/arm64
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push ARM64 all-in-one
-        id: build
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile.all
-          platforms: linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  # ARMv7 构建任务 (并行，最低优先级)
-  build-backend-armv7:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      backend-digest-armv7: ${{ steps.build.outputs.digest }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend
-          tags: |
-            type=ref,event=tag
-            type=raw,value=armv7-latest,enable={{is_default_branch}}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/arm/v7
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push ARMv7 backend
-        id: build
-        uses: docker/build-push-action@v5
-        with:
-          context: ./backend
-          file: ./backend/Dockerfile
-          platforms: linux/arm/v7
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  build-frontend-armv7:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      frontend-digest-armv7: ${{ steps.build.outputs.digest }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend
-          tags: |
-            type=ref,event=tag
-            type=raw,value=armv7-latest,enable={{is_default_branch}}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/arm/v7
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push ARMv7 frontend
-        id: build
-        uses: docker/build-push-action@v5
-        with:
-          context: ./frontend
-          file: ./frontend/Dockerfile.nginx
-          platforms: linux/arm/v7
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  build-all-in-one-armv7:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      all-in-one-digest-armv7: ${{ steps.build.outputs.digest }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all
-          tags: |
-            type=ref,event=tag
-            type=raw,value=armv7-latest,enable={{is_default_branch}}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/arm/v7
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push ARMv7 all-in-one
-        id: build
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile.all
-          platforms: linux/arm/v7
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  # 创建多架构 manifest
-  create-manifests:
-    runs-on: ubuntu-latest
-    needs: [build-backend-amd64, build-frontend-amd64, build-all-in-one-amd64]
-    if: startsWith(github.ref, 'refs/tags/')
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create backend manifest
-        run: |
-          # 创建主标签 manifest (使用正确的标签格式)
-          docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.ref_name }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:amd64-latest
-
-          # 推送主 manifest
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.ref_name }}
-
-      - name: Create frontend manifest
-        run: |
-          # 创建主标签 manifest (使用正确的标签格式)
-          docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ github.ref_name }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:amd64-latest
-
-          # 推送主 manifest
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ github.ref_name }}
-
-      - name: Create all-in-one manifest
-        run: |
-          # 创建主标签 manifest (使用���确的标签格式)
-          docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:amd64-latest
-
-          # 推送主 manifest
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }}
-
-  # 等待所有架构构建完成 (非阻塞)
-  wait-all-architectures:
-    runs-on: ubuntu-latest
-    needs: [build-backend-arm64, build-frontend-arm64, build-all-in-one-arm64, build-backend-armv7, build-frontend-armv7, build-all-in-one-armv7]
-    if: always() && startsWith(github.ref, 'refs/tags/')
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create complete multi-arch manifests
-        run: |
-          echo "Creating complete multi-architecture manifests..."
-
-          # Backend - 添加所有成功的架构 (使用正确的标签格式)
-          docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.ref_name }}-complete \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:amd64-latest
-
-          # 尝试添加 ARM64
-          docker manifest add ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.ref_name }}-complete \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:arm64-latest || echo "ARM64 backend not available"
-
-          # 尝试添加 ARMv7
-          docker manifest add ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.ref_name }}-complete \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:armv7-latest || echo "ARMv7 backend not available"
-
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-backend:${{ github.ref_name }}-complete || echo "Failed to push complete backend manifest"
-
-          # Frontend - 添加所有成功的架构 (使用正确的标签格式)
-          docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ github.ref_name }}-complete \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:amd64-latest
-
-          docker manifest add ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ github.ref_name }}-complete \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:arm64-latest || echo "ARM64 frontend not available"
-
-          docker manifest add ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ github.ref_name }}-complete \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:armv7-latest || echo "ARMv7 frontend not available"
-
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:${{ github.ref_name }}-complete || echo "Failed to push complete frontend manifest"
-
-          # All-in-one - 添加所有成功的架构 (使用正确的标签格式)
-          docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }}-complete \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:amd64-latest
-
-          docker manifest add ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }}-complete \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:arm64-latest || echo "ARM64 all-in-one not available"
-
-          docker manifest add ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }}-complete \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:armv7-latest || echo "ARMv7 all-in-one not available"
-
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }}-complete || echo "Failed to push complete all-in-one manifest"
-
-  # 创建 release (依赖 AMD64 完成即可)
+  # Create release (only for tags)
   create-release:
     runs-on: ubuntu-latest
-    needs: [create-manifests]
+    needs: build-images
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
@@ -556,13 +91,12 @@ jobs:
           body: |
             ## 🐳 Multi-Architecture Docker Images
 
-            This release includes support for multiple architectures with **prioritized deployment**:
+            This release includes support for multiple architectures:
 
-            ✅ **linux/amd64** - Intel/AMD 64-bit (Desktops, Servers) - *Available Immediately*
-            🔄 **linux/arm64** - ARM 64-bit (Apple Silicon, ARM Servers) - *Available after completion*
-            🔄 **linux/arm/v7** - ARM 32-bit (Raspberry Pi, ARM Devices) - *Available after completion*
+            ✅ **linux/amd64** - Intel/AMD 64-bit (Desktops, Servers)
+            ✅ **linux/arm64** - ARM 64-bit (Apple Silicon, ARM Servers)
 
-            ## 🚀 Quick Start (AMD64 - Immediately Available)
+            ## 🚀 Quick Start
 
             ### All-in-One Image (Recommended)
             ```bash
@@ -571,7 +105,7 @@ jobs:
               -p 8080:80 \
               -v mailman_data:/app/data \
               --restart unless-stopped \
-              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }}
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all-in-one:${{ github.ref_name }}
             ```
 
             ### Separate Frontend and Backend
@@ -596,51 +130,23 @@ jobs:
 
             ### For Apple Silicon (M1/M2/M3) Mac
             ```bash
-            # Wait for ARM64 build to complete, then use:
             docker run -d \
               --name mailman \
               -p 8080:80 \
               -v mailman_data:/app/data \
               --platform linux/arm64 \
-              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }}-complete
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all-in-one:${{ github.ref_name }}
             ```
-
-            ### For Raspberry Pi (ARM32)
-            ```bash
-            # Wait for ARMv7 build to complete, then use:
-            docker run -d \
-              --name mailman \
-              -p 8080:80 \
-              -v mailman_data:/app/data \
-              --platform linux/arm/v7 \
-              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-all:${{ github.ref_name }}-complete
-            ```
-
-            ## 📦 Available Tags
-
-            ### Primary Tags (AMD64优先)
-            - `latest`, `${{ github.ref_name }}` - AMD64 version (immediately available)
-            - `${{ github.ref_name }}-complete` - All architectures (available after all builds complete)
-
-            ### Architecture-Specific Tags
-            - `amd64-latest` - Intel/AMD 64-bit
-            - `arm64-latest` - ARM 64-bit (Apple Silicon)
-            - `armv7-latest` - ARM 32-bit (Raspberry Pi)
 
             ## 🌐 Access the Application
 
             After deployment:
             - **Frontend**: http://localhost:8080
             - **Default Login**: admin / admin123
-            - **API Docs**: http://localhost:8080/swagger/index.html
+            - **API**: http://localhost:8080/api/health
 
-            ## ⚡ Build Strategy
+            ## 📦 Architecture Support
 
-            This release uses a **prioritized multi-stage build**:
-            1. **Stage 1**: AMD64 builds complete and deploy immediately
-            2. **Stage 2**: ARM64 and ARMv7 builds continue in parallel
-            3. **Stage 3**: Complete multi-architecture manifests created when all builds finish
-
-            This ensures fastest possible deployment for the majority of users while still supporting all architectures.
+            This release automatically supports both AMD64 and ARM64 architectures. Docker will automatically select the appropriate image for your platform.
           draft: false
           prerelease: false
