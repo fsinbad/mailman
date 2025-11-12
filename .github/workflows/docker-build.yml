@@ -19,7 +19,7 @@ jobs:
       packages: write
     strategy:
       matrix:
-        component: [backend, frontend, all-in-one]
+        component: [backend, frontend, all]
         include:
           - component: backend
             context: ./backend
@@ -27,7 +27,7 @@ jobs:
           - component: frontend
             context: ./frontend
             file: ./frontend/Dockerfile.nginx
-          - component: all-in-one
+          - component: all
             context: .
             file: ./Dockerfile.all
     steps:
