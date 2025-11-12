@@ -1,0 +1,112 @@
+# K3s 优化配置
+# 适用于资源受限的边缘环境和开发环境
+
+# 继承 production 配置并进行资源优化
+mailman:
+  backend:
+    # 降低副本数
+    replicaCount: 1
+    
+    # 优化资源配置
+    resources:
+      limits:
+        cpu: 500m        # 降低 CPU 限制
+        memory: 512Mi    # 降低内存限制
+      requests:
+        cpu: 200m        # 降低 CPU 请求
+        memory: 256Mi    # 降低内存请求
+    
+    # 调整健康检查
+    livenessProbe:
+      initialDelaySeconds: 60  # 增加初始延迟
+      periodSeconds: 15
+      timeoutSeconds: 10
+      failureThreshold: 5
+    
+    readinessProbe:
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 5
+    
+    # 禁用 HPA (K3s 单节点通常不需要)
+    autoscaling:
+      enabled: false
+  
+  frontend:
+    # 降低副本数
+    replicaCount: 1
+    
+    # 优化资源配置
+    resources:
+      limits:
+        cpu: 250m        # 降低 CPU 限制
+        memory: 256Mi    # 降低内存限制
+      requests:
+        cpu: 100m        # 降低 CPU 请求
+        memory: 128Mi    # 降低内存请求
+    
+    # 调整健康检查
+    livenessProbe:
+      initialDelaySeconds: 30
+      periodSeconds: 15
+      timeoutSeconds: 10
+      failureThreshold: 5
+    
+    readinessProbe:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 5
+    
+    # 禁用 HPA
+    autoscaling:
+      enabled: false
+
+# Ingress 配置 - 使用 Traefik
+ingress:
+  enabled: true
+  className: "traefik"  # K3s 默认使用 Traefik
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    # 如需 HTTPS，取消注释以下行
+    # traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # traefik.ingress.kubernetes.io/router.tls: "true"
+  
+  hosts:
+    - host: mailman.local
+      paths:
+        - path: /
+          pathType: Prefix
+  
+  # TLS 配置（可选）
+  tls: []
+    # - secretName: mailman-tls
+    #   hosts:
+    #     - mailman.local
+
+# 持久化存储 - 使用 K3s 的 local-path
+persistence:
+  data:
+    enabled: true
+    storageClassName: "local-path"  # K3s 默认 StorageClass
+    size: 5Gi
+  logs:
+    enabled: true
+    storageClassName: "local-path"
+    size: 2Gi
+
+# NetworkPolicy - K3s 支持但可选
+networkPolicy:
+  enabled: false  # 简化配置，可按需启用
+
+# PodDisruptionBudget - 单节点不需要
+podDisruptionBudget:
+  enabled: false
+
+# 监控配置 - 可选
+monitoring:
+  prometheus:
+    enabled: false  # 资源受限环境可禁用
+    serviceMonitor:
+      enabled: false

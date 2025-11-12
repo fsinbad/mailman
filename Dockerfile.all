@@ -49,7 +49,7 @@ COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 RUN mkdir -p /var/log/nginx /app
 
 # Expose ports
-EXPOSE 80 8080
+EXPOSE 80 8081
 
 # Start supervisor
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf", "-n"]

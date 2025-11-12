@@ -70,10 +70,15 @@ docker run -d \
 | 安装方式 | 复杂度 | 时间 | 适用场景 |
 |---------|--------|------|----------|
 | **Docker 一键部署** | ⭐ | 2分钟 | 新手体验 |
+| **K3s 轻量级集群** | ⭐⭐ | 5分钟 | 边缘计算、IoT |
 | **Docker Compose** | ⭐⭐ | 5分钟 | 生产环境 |
+| **Kubernetes 集群** | ⭐⭐⭐ | 10分钟 | 大规模部署 |
 | **源码开发** | ⭐⭐⭐⭐ | 15分钟 | 开发调试 |
 
-📖 **详细安装指南**：[`INSTALL.md`](./INSTALL.md)
+📖 **详细安装指南**：
+- [`INSTALL.md`](./INSTALL.md) - Docker 和本地开发
+- [`K3S_QUICKSTART.md`](./K3S_QUICKSTART.md) - K3s 快速部署
+- [`HELM_DEPLOYMENT.md`](./HELM_DEPLOYMENT.md) - Kubernetes 集群部署
 
 ## 🌐 访问地址
 
@@ -248,11 +253,28 @@ cd mailman
 docker-compose up -d
 ```
 
-### 3. Kubernetes
+### 3. K3s 轻量级 Kubernetes（推荐）
+```bash
+# 一键部署
+./deploy-k3s.sh
+
+# 或手动部署
+helm install mailman ./helm/mailman \
+  --values ./helm/mailman/values-matrixdb-production.yaml \
+  --values ./helm/mailman/values-k3s.yaml
+```
+
+📖 **K3s 部署指南**：
+- 🚀 [快速开始](./K3S_QUICKSTART.md) - 5分钟快速部署
+- 📖 [完整文档](./K3S_DEPLOYMENT.md) - 详细配置说明
+
+### 4. 标准 Kubernetes
 ```bash
 cd helm/mailman
 ./deploy.sh -e production -t standard
 ```
+
+📖 **Kubernetes 部署指南**：[`HELM_DEPLOYMENT.md`](./HELM_DEPLOYMENT.md)
 
 ## 🔧 配置说明
 
